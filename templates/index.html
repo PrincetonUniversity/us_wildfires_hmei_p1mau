@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>US Wildfire Pollution Visualization</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h1>US Wildfire Pollution</h1>
+            <div class="controls">
+                <select id="pollutant-select">
+                    <option value="pm25">PM2.5</option>
+                </select>
+                <button id="reset-view">Reset View</button>
+            </div>
+            <div class="legend" id="pollutant-legend">
+                <h3>PM2.5 Concentration (µg/m³)</h3>
+                <div class="color-scale"></div>
+            </div>
+        </div>
+        <div id="map"></div>
+    </div>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
