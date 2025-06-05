@@ -47,6 +47,10 @@ def load_data(pm25_csv_path=None, counties_shp_path=None):
         print('CSV columns:', pm25.columns)
         counties = gpd.read_file(counties_path)
 
+        # Load population data
+        population = pd.read_csv('data/population_2021_2023.csv')
+        print('Population data loaded')
+
         # --- Load FIPS lookup and merge ---
         fips_lookup = pd.read_csv('data/FIPScode.csv', header=None, names=['FIPS_code', 'county_name'])
         fips_lookup['FIPS_code'] = fips_lookup['FIPS_code'].astype(str).str.zfill(5)
@@ -54,6 +58,15 @@ def load_data(pm25_csv_path=None, counties_shp_path=None):
         fips_lookup['county_index'] = fips_lookup['county_index'].astype(str)
         pm25['county_index'] = pm25['county_index'].astype(str)
         pm25 = pm25.merge(fips_lookup[['county_index', 'FIPS_code', 'county_name']], on='county_index', how='left')
+        
+        # Process population data
+        population['county_index'] = population['county_index'].astype(str)
+        population = population.merge(fips_lookup[['county_index', 'FIPS_code']], on='county_index', how='left')
+        
+        # Calculate average population, ignoring zeros
+        population_avg = population.groupby('FIPS_code').apply(
+            lambda x: x[x['population'] > 0]['population'].mean()
+        ).reset_index(name='avg_population')
         
         # Ensure numeric and remove NA
         pm25['pm25'] = pd.to_numeric(pm25['pm25'], errors='coerce')
@@ -67,7 +80,7 @@ def load_data(pm25_csv_path=None, counties_shp_path=None):
         
         # First average across tiers for each county/year
         county_year_avg_total = total_pm25.groupby(['FIPS_code', 'year'])['pm25'].mean().reset_index()
-        county_year_avg_fire = fire_pm25.groupby(['FIPS_code', 'year'])['pm25'].mean().reset_index()
+        county_year_avg_fire = fire_pm25.groupby(['FIPS_code', 'year'])['pm25'].sum().reset_index()
         
         # Then average across years for final choropleth values
         choropleth_data_total = county_year_avg_total.groupby('FIPS_code')['pm25'].mean().reset_index(name='avg_total_pm25')
@@ -77,8 +90,8 @@ def load_data(pm25_csv_path=None, counties_shp_path=None):
         # Get total PM2.5 (average across tiers)
         total_by_county_year = total_pm25.groupby(['FIPS_code', 'year'])['pm25'].mean().reset_index(name='total')
         
-        # Get fire PM2.5 (average across tiers)
-        fire_by_county_year = fire_pm25.groupby(['FIPS_code', 'year'])['pm25'].mean().reset_index(name='fire')
+        # Get fire PM2.5 (sum across tiers)
+        fire_by_county_year = fire_pm25.groupby(['FIPS_code', 'year'])['pm25'].sum().reset_index(name='fire')
         
         print('\nFire data sample before merge:')
         print(fire_by_county_year.head())
@@ -125,6 +138,9 @@ def load_data(pm25_csv_path=None, counties_shp_path=None):
         
         # Then merge bar chart data
         counties = counties.merge(bar_pivot, left_on='GEOID', right_on='FIPS_code', how='left', suffixes=('', '_bar'))
+        
+        # Merge average population data
+        counties = counties.merge(population_avg, left_on='GEOID', right_on='FIPS_code', how='left', suffixes=('', '_pop'))
         
         # Finally merge county names
         counties = counties.merge(fips_lookup[['FIPS_code', 'county_name']], left_on='GEOID', right_on='FIPS_code', how='left', suffixes=('', '_name'))

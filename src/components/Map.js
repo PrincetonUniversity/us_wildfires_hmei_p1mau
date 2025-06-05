@@ -52,9 +52,9 @@ const Map = ({ mapboxToken }) => {
         -66.0,   // East
         50.0     // North
       ],
-      padding: {top: 20, bottom: 20, left: 20, right: 20}
+      padding: { top: 20, bottom: 20, left: 20, right: 20 }
     });
-    
+
     // Disable map rotation using right click + drag
     map.current.dragRotate.disable();
     // Disable map rotation using touch rotation gesture
@@ -72,9 +72,9 @@ const Map = ({ mapboxToken }) => {
       try {
         const response = await fetch('http://localhost:8000/api/counties');
         if (!response.ok) throw new Error('Failed to fetch PM2.5 data');
-        
+
         const data = await response.json();
-        
+
         // Add source and layer
         if (map.current) {
           map.current.addSource('pm25', {
@@ -105,33 +105,17 @@ const Map = ({ mapboxToken }) => {
               const feature = e.features[0];
               const props = feature.properties;
 
-              // Debug log
-              console.log('County properties:', props);
-
               // Prepare chart data for 2021–2023
               const chartData = [2021, 2022, 2023].map(year => {
                 // Get the data for this year
                 const total = Number(props[`pm25_${year}_total`] || 0);
                 const fire = Number(props[`pm25_${year}_fire`] || 0);
                 const nonFire = Number(props[`pm25_${year}_nonfire`] || 0);
-                
-                // Debug log each year's data
-                console.log(`Year ${year} data:`, { 
-                  total,
-                  fire,
-                  nonFire,
-                  totalKey: `pm25_${year}_total`,
-                  fireKey: `pm25_${year}_fire`,
-                  nonFireKey: `pm25_${year}_nonfire`,
-                  totalValue: props[`pm25_${year}_total`],
-                  fireValue: props[`pm25_${year}_fire`],
-                  nonFireValue: props[`pm25_${year}_nonfire`]
-                });
-                
+
                 // Ensure values are valid
                 const validFire = Math.max(0, Math.min(fire, total));
                 const validNonFire = Math.max(0, total - validFire);
-                
+
                 return {
                   year,
                   fire: validFire,
@@ -139,12 +123,9 @@ const Map = ({ mapboxToken }) => {
                 };
               });
 
-              // Debug log the final data
-              console.log('Final chart data:', chartData);
-
               // Create a DOM node for React rendering
               const popupNode = document.createElement('div');
-              
+
               // Add county name above chart
               const nameDiv = document.createElement('div');
               nameDiv.style.fontWeight = 'bold';
@@ -158,6 +139,9 @@ const Map = ({ mapboxToken }) => {
               valuesDiv.style.marginBottom = '8px';
               valuesDiv.style.fontSize = '0.9em';
               valuesDiv.innerHTML = `
+                <div style="margin-top: 8px; border-top: 1px solid #eee; padding-top: 8px; border-bottom: 1px solid #eee; padding-bottom: 8px;">
+                  <div>Average Population (2021-2023): ${props.avg_population?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || 'N/A'}</div>
+                </div>
                 <div>Total PM2.5: ${props.avg_total_pm25?.toFixed(2) || 0} µg/m³</div>
                 <div>Fire PM2.5: ${props.fire_pm25?.toFixed(2) || 0} µg/m³</div>
                 <div>Non-fire PM2.5: ${(props.avg_total_pm25 - props.fire_pm25)?.toFixed(2) || 0} µg/m³</div>
@@ -265,8 +249,8 @@ const Map = ({ mapboxToken }) => {
       backgroundColor: '#f0f0f0',
       overflow: 'hidden'
     }}>
-      <div 
-        ref={mapContainer} 
+      <div
+        ref={mapContainer}
         style={{
           position: 'absolute',
           top: 0,
@@ -277,7 +261,7 @@ const Map = ({ mapboxToken }) => {
           height: '100%'
         }}
       />
-      
+
       {/* Layer Toggle */}
       <div style={{
         position: 'absolute',
@@ -291,29 +275,29 @@ const Map = ({ mapboxToken }) => {
       }}>
         <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>PM2.5 Layer</div>
         <label style={{ display: 'block', marginBottom: '5px' }}>
-          <input 
-            type="radio" 
-            name="layer" 
-            checked={activeLayer === 'avg_total_pm25'} 
+          <input
+            type="radio"
+            name="layer"
+            checked={activeLayer === 'avg_total_pm25'}
             onChange={() => setActiveLayer('avg_total_pm25')}
             style={{ marginRight: '5px' }}
           />
           Total PM2.5
         </label>
         <label style={{ display: 'block' }}>
-          <input 
-            type="radio" 
-            name="layer" 
-            checked={activeLayer === 'fire_pm25'} 
+          <input
+            type="radio"
+            name="layer"
+            checked={activeLayer === 'fire_pm25'}
             onChange={() => setActiveLayer('fire_pm25')}
             style={{ marginRight: '5px' }}
           />
           Fire-related PM2.5
         </label>
       </div>
-      
+
       {/* Legend */}
-      <div 
+      <div
         id="pm25-legend"
         style={{
           position: 'absolute',
@@ -331,8 +315,8 @@ const Map = ({ mapboxToken }) => {
           PM2.5 {activeLayer === 'avg_total_pm25' ? '(Total)' : '(Fire-related)'} (μg/m³)
         </div>
         {(activeLayer === 'fire_pm25' ? PM25_COLORS_FIRE : PM25_COLORS_TOTAL).map(([value, color], i, arr) => {
-          const label = (i === arr.length - 1) ? `${value}+` : `${value} - ${arr[i+1][0]}`;
-          if (i < arr.length -1) { // Display N-1 ranges
+          const label = (i === arr.length - 1) ? `${value}+` : `${value} - ${arr[i + 1][0]}`;
+          if (i < arr.length - 1) { // Display N-1 ranges
             return (
               <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '2px' }}>
                 <div style={{
@@ -342,27 +326,27 @@ const Map = ({ mapboxToken }) => {
                   marginRight: '5px',
                   border: '1px solid #999'
                 }}></div>
-                <span>{`${value} - ${arr[i+1][0]}`}</span>
+                <span>{`${value} - ${arr[i + 1][0]}`}</span>
               </div>
             );
-          } else if (i === arr.length -1) { // Display the last item as X+
-             return (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '2px' }}>
-                  <div style={{
-                    width: '20px',
-                    height: '15px',
-                    backgroundColor: color,
-                    marginRight: '5px',
-                    border: '1px solid #999'
-                  }}></div>
-                  <span>{`${value}+`}</span>
-                </div>
+          } else if (i === arr.length - 1) { // Display the last item as X+
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '2px' }}>
+                <div style={{
+                  width: '20px',
+                  height: '15px',
+                  backgroundColor: color,
+                  marginRight: '5px',
+                  border: '1px solid #999'
+                }}></div>
+                <span>{`${value}+`}</span>
+              </div>
             );
           }
           return null;
         })}
       </div>
-      
+
       {loading && (
         <div style={{
           position: 'absolute',

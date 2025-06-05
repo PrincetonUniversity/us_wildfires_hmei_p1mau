@@ -27,9 +27,9 @@ function App() {
   }
 
   return (
-    <Box sx={{ 
-      display: 'flex', 
-      flexDirection: 'column', 
+    <Box sx={{
+      display: 'flex',
+      flexDirection: 'column',
       height: '100vh',
       width: '100vw',
       margin: 0,
@@ -37,7 +37,7 @@ function App() {
       overflow: 'hidden'
     }}>
       <CssBaseline />
-      
+
       {/* Header */}
       <Box component="header" sx={{ bgcolor: '#1976d2', color: 'white', py: 2, px: 4 }}>
         <Container maxWidth="xl">
@@ -46,7 +46,7 @@ function App() {
           </Typography>
         </Container>
       </Box>
-      
+
       {/* Map Container */}
       <Box sx={{ flex: 1, position: 'relative' }}>
         <Map mapboxToken={mapboxToken} />
