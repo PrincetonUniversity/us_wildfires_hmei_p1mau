@@ -44,7 +44,6 @@ def load_data(pm25_csv_path=None, counties_shp_path=None):
         
         # Load PM2.5 data
         pm25 = pd.read_csv(pm25_path, encoding='utf-8-sig')
-        print('CSV columns:', pm25.columns)
         counties = gpd.read_file(counties_path)
 
         # Load population data
@@ -93,30 +92,13 @@ def load_data(pm25_csv_path=None, counties_shp_path=None):
         # Get fire PM2.5 (sum across tiers)
         fire_by_county_year = fire_pm25.groupby(['FIPS_code', 'year'])['pm25'].sum().reset_index(name='fire')
         
-        print('\nFire data sample before merge:')
-        print(fire_by_county_year.head())
-        
         # Merge and calculate nonfire
         bar_df = pd.merge(total_by_county_year, fire_by_county_year, on=['FIPS_code', 'year'], how='outer').fillna(0)
-        
-        print('\nMerged data sample:')
-        print(bar_df.head())
         
         # Ensure all values are non-negative and reasonable
         bar_df['fire_raw'] = bar_df['fire']
         bar_df['fire'] = bar_df['fire'].clip(lower=0, upper=bar_df['total'])
         bar_df['nonfire'] = (bar_df['total'] - bar_df['fire']).clip(lower=0)
-        
-        # Debug print to check for anomalies
-        print('\nData ranges:')
-        print('Total PM2.5 range:', bar_df['total'].min(), 'to', bar_df['total'].max())
-        print('Fire PM2.5 range:', bar_df['fire'].min(), 'to', bar_df['fire'].max())
-        print('Non-fire PM2.5 range:', bar_df['nonfire'].min(), 'to', bar_df['nonfire'].max())
-        
-        # Debug print for Humboldt County (FIPS 06023)
-        humboldt = bar_df[bar_df['FIPS_code'] == '06023']
-        print('\nHumboldt County (FIPS 06023) bar_df:')
-        print(humboldt[['year', 'total', 'fire_raw', 'fire', 'nonfire']])
         
         # Map year numbers to actual years
         year_map = {1: 2021, 2: 2022, 3: 2023}
@@ -126,10 +108,6 @@ def load_data(pm25_csv_path=None, counties_shp_path=None):
         bar_pivot = bar_df.pivot(index='FIPS_code', columns='year')[['total', 'fire', 'nonfire']]
         bar_pivot.columns = [f'pm25_{col[1]}_{col[0]}' for col in bar_pivot.columns]
         bar_pivot = bar_pivot.reset_index()
-
-        print('\nPivoted data sample:')
-        print(bar_pivot.head())
-        print('\nPivoted columns:', bar_pivot.columns.tolist())
 
         # Merge everything onto counties
         # First merge choropleth data
@@ -150,12 +128,6 @@ def load_data(pm25_csv_path=None, counties_shp_path=None):
         
         # Fill NA with 0 for frontend
         counties = counties.fillna(0)
-        
-        # Debug print to verify final data
-        print('\nFinal sample county properties:')
-        sample_county = counties.iloc[0].to_dict()
-        print('Available columns:', counties.columns.tolist())
-        print('PM2.5 data:', {k: v for k, v in sample_county.items() if k.startswith('pm25_')})
         
         # Verify all required columns are present
         required_columns = [
@@ -184,15 +156,8 @@ async def get_counties():
         df = load_data('data/pm25_data.csv', 'data/shapefiles/cb_2018_us_county_20m.shp')
         print(f"Data loaded successfully. Rows: {len(df)}")
         
-        # Debug: print join keys and sample properties
-        print('Sample counties GEOID:', df['GEOID'].head())
-        if 'county_index' in df.columns:
-            print('Sample counties county_index:', df['county_index'].head())
-        print('Sample county properties:', df.iloc[0].to_dict())
-
         # Convert to GeoJSON
         gdf = gpd.GeoDataFrame(df)
-        print("Converted to GeoDataFrame")
         
         # Convert to GeoJSON format
         features = []
@@ -210,7 +175,6 @@ async def get_counties():
                 print(f"Error processing feature: {feat_err}")
                 continue
                 
-        print(f"Successfully processed {len(features)} features")
         return {
             "type": "FeatureCollection",
             "features": features
