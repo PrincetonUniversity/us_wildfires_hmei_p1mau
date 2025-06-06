@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { createRoot } from 'react-dom/client';
@@ -21,6 +21,15 @@ const PM25_COLORS_FIRE = [
   [1.5, '#fe9929'],   // orange
   [2.0, '#ec7014'],  // dark orange
   [2.5, '#cc4c02']   // red (2.5+)
+];
+
+const POPULATION_COLORS = [
+  [0, '#f7fbff'],      // very light blue
+  [50000, '#deebf7'],  // light blue
+  [100000, '#c6dbef'], // blue
+  [250000, '#9ecae1'], // medium blue
+  [500000, '#6baed6'], // darker blue
+  [1000000, '#2171b5'] // dark blue
 ];
 
 const Map = ({ mapboxToken }) => {
@@ -110,7 +119,7 @@ const Map = ({ mapboxToken }) => {
                 // Get the data for this year
                 const total = Number(props[`pm25_${year}_total`] || 0);
                 const fire = Number(props[`pm25_${year}_fire`] || 0);
-                const nonFire = Number(props[`pm25_${year}_nonfire`] || 0);
+                // const nonFire = Number(props[`pm25_${year}_nonfire`] || 0);
 
                 // Ensure values are valid
                 const validFire = Math.max(0, Math.min(fire, total));
@@ -201,9 +210,18 @@ const Map = ({ mapboxToken }) => {
   // Update layer when activeLayer changes
   useEffect(() => {
     if (map.current && map.current.isStyleLoaded() && map.current.getLayer('pm25-layer')) {
-      const isFireLayer = activeLayer === 'fire_pm25';
-      const currentColors = isFireLayer ? PM25_COLORS_FIRE : PM25_COLORS_TOTAL;
-      const paintStops = currentColors.reduce((acc, [value, color]) => acc.concat(value, color), []);
+      let currentColors;
+      let paintStops;
+
+      if (activeLayer === 'fire_pm25') {
+        currentColors = PM25_COLORS_FIRE;
+      } else if (activeLayer === 'avg_total_pm25') {
+        currentColors = PM25_COLORS_TOTAL;
+      } else if (activeLayer === 'avg_population') {
+        currentColors = POPULATION_COLORS;
+      }
+
+      paintStops = currentColors.reduce((acc, [value, color]) => acc.concat(value, color), []);
 
       map.current.setPaintProperty('pm25-layer', 'fill-color', [
         'interpolate',
@@ -217,7 +235,15 @@ const Map = ({ mapboxToken }) => {
       if (legendEl) {
         const titleEl = legendEl.querySelector('div:first-child');
         if (titleEl) {
-          titleEl.textContent = `PM2.5 ${isFireLayer ? '(Fire-related)' : '(Total)'} (μg/m³)`;
+          let title = '';
+          if (activeLayer === 'avg_total_pm25') {
+            title = 'Total PM2.5 (μg/m³)';
+          } else if (activeLayer === 'fire_pm25') {
+            title = 'Fire PM2.5 (μg/m³)';
+          } else if (activeLayer === 'avg_population') {
+            title = 'Population';
+          }
+          titleEl.textContent = title;
         }
       }
     }
@@ -273,7 +299,7 @@ const Map = ({ mapboxToken }) => {
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
         zIndex: 1
       }}>
-        <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>PM2.5 Layer</div>
+        <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Map Layer</div>
         <label style={{ display: 'block', marginBottom: '5px' }}>
           <input
             type="radio"
@@ -284,7 +310,7 @@ const Map = ({ mapboxToken }) => {
           />
           Total PM2.5
         </label>
-        <label style={{ display: 'block' }}>
+        <label style={{ display: 'block', marginBottom: '5px' }}>
           <input
             type="radio"
             name="layer"
@@ -293,6 +319,16 @@ const Map = ({ mapboxToken }) => {
             style={{ marginRight: '5px' }}
           />
           Fire-related PM2.5
+        </label>
+        <label style={{ display: 'block' }}>
+          <input
+            type="radio"
+            name="layer"
+            checked={activeLayer === 'avg_population'}
+            onChange={() => setActiveLayer('avg_population')}
+            style={{ marginRight: '5px' }}
+          />
+          Population
         </label>
       </div>
 
@@ -312,11 +348,20 @@ const Map = ({ mapboxToken }) => {
         }}
       >
         <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>
-          PM2.5 {activeLayer === 'avg_total_pm25' ? '(Total)' : '(Fire-related)'} (μg/m³)
+          {activeLayer === 'avg_total_pm25' ? 'Total PM2.5 (μg/m³)' :
+            activeLayer === 'fire_pm25' ? 'Fire PM2.5 (μg/m³)' :
+              'Population'}
         </div>
-        {(activeLayer === 'fire_pm25' ? PM25_COLORS_FIRE : PM25_COLORS_TOTAL).map(([value, color], i, arr) => {
-          const label = (i === arr.length - 1) ? `${value}+` : `${value} - ${arr[i + 1][0]}`;
-          if (i < arr.length - 1) { // Display N-1 ranges
+        {(() => {
+          const colors = activeLayer === 'fire_pm25' ? PM25_COLORS_FIRE :
+            activeLayer === 'avg_total_pm25' ? PM25_COLORS_TOTAL :
+              POPULATION_COLORS;
+
+          return colors.map(([value, color], i, arr) => {
+            const label = i === arr.length - 1
+              ? `${value.toLocaleString()}+`
+              : `${value.toLocaleString()} - ${arr[i + 1][0].toLocaleString()}`;
+
             return (
               <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '2px' }}>
                 <div style={{
@@ -326,25 +371,11 @@ const Map = ({ mapboxToken }) => {
                   marginRight: '5px',
                   border: '1px solid #999'
                 }}></div>
-                <span>{`${value} - ${arr[i + 1][0]}`}</span>
+                <span>{label}</span>
               </div>
             );
-          } else if (i === arr.length - 1) { // Display the last item as X+
-            return (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '2px' }}>
-                <div style={{
-                  width: '20px',
-                  height: '15px',
-                  backgroundColor: color,
-                  marginRight: '5px',
-                  border: '1px solid #999'
-                }}></div>
-                <span>{`${value}+`}</span>
-              </div>
-            );
-          }
-          return null;
-        })}
+          });
+        })()}
       </div>
 
       {loading && (
