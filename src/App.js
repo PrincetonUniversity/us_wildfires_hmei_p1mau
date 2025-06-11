@@ -49,7 +49,7 @@ function App() {
 
       {/* Map Container */}
       <Box sx={{ flex: 1, position: 'relative' }}>
-        <Map mapboxToken={mapboxToken} />
+        <Map mapboxToken={mapboxToken} stateAbbr="CA" />
       </Box>
     </Box>
   );

@@ -3,6 +3,9 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { createRoot } from 'react-dom/client';
 import CountyBarChart from './CountyBarChart';
+import DateRangeSelector from './DateRangeSelector';
+import { format } from 'date-fns';
+import { Typography } from '@mui/material';
 
 // Color scale for PM2.5 values (yellow to orange to red)
 const PM25_COLORS_TOTAL = [
@@ -32,12 +35,141 @@ const POPULATION_COLORS = [
   [1000000, '#2171b5'] // dark blue
 ];
 
-const Map = ({ mapboxToken }) => {
+// State FIPS to abbreviation mapping
+const STATE_FIPS_TO_ABBR = {
+  '01': 'AL', '02': 'AK', '04': 'AZ', '05': 'AR', '06': 'CA', '08': 'CO', '09': 'CT', '10': 'DE',
+  '11': 'DC', '12': 'FL', '13': 'GA', '15': 'HI', '16': 'ID', '17': 'IL', '18': 'IN', '19': 'IA',
+  '20': 'KS', '21': 'KY', '22': 'LA', '23': 'ME', '24': 'MD', '25': 'MA', '26': 'MI', '27': 'MN',
+  '28': 'MS', '29': 'MO', '30': 'MT', '31': 'NE', '32': 'NV', '33': 'NH', '34': 'NJ', '35': 'NM',
+  '36': 'NY', '37': 'NC', '38': 'ND', '39': 'OH', '40': 'OK', '41': 'OR', '42': 'PA', '44': 'RI',
+  '45': 'SC', '46': 'SD', '47': 'TN', '48': 'TX', '49': 'UT', '50': 'VT', '51': 'VA', '53': 'WA',
+  '54': 'WV', '55': 'WI', '56': 'WY'
+};
+
+const getStateFromFIPS = (fips) => {
+  if (!fips) return '';
+  const stateFIPS = fips.toString().padStart(5, '0').substring(0, 2);
+  return STATE_FIPS_TO_ABBR[stateFIPS] || '';
+};
+
+const Map = ({ mapboxToken, stateAbbr }) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeLayer, setActiveLayer] = useState('avg_total_pm25');
+  const [startDate, setStartDate] = useState(new Date('2021-01-01'));
+  const [endDate, setEndDate] = useState(new Date('2023-12-31'));
+  const [timeScale, setTimeScale] = useState('period');
+  const [pendingUpdate, setPendingUpdate] = useState(false);
+  const currentCountyRef = useRef(null);
+
+  // Function to fetch data with date range and time scale
+  const fetchData = async (start, end, scale) => {
+    try {
+      let startStr, endStr;
+
+      // Format dates based on time scale
+      switch (scale) {
+        case 'yearly':
+          startStr = format(start, 'yyyy');
+          endStr = startStr; // Same year for yearly view
+          break;
+        case 'monthly':
+          // Get the month's start and end dates
+          const month = start.getMonth();
+          const year = start.getFullYear();
+          const monthStart = new Date(year, month, 1);
+          const monthEnd = new Date(year, month + 1, 0); // Last day of the month
+          startStr = format(monthStart, 'yyyy-MM-dd');
+          endStr = format(monthEnd, 'yyyy-MM-dd');
+          break;
+        case 'seasonal':
+          // Get the season's start and end dates
+          const season = start.getMonth();
+          const seasonYear = start.getFullYear();
+          let seasonStart, seasonEnd;
+
+          if (season === 11) { // Winter
+            seasonStart = new Date(seasonYear, 11, 1); // December 1
+            seasonEnd = new Date(seasonYear + 1, 2, 28); // February 28/29
+          } else if (season === 2) { // Spring
+            seasonStart = new Date(seasonYear, 2, 1); // March 1
+            seasonEnd = new Date(seasonYear, 5, 30); // May 31
+          } else if (season === 5) { // Summer
+            seasonStart = new Date(seasonYear, 5, 1); // June 1
+            seasonEnd = new Date(seasonYear, 8, 30); // August 31
+          } else { // Fall
+            seasonStart = new Date(seasonYear, 8, 1); // September 1
+            seasonEnd = new Date(seasonYear, 11, 30); // November 30
+          }
+
+          startStr = format(seasonStart, 'yyyy-MM-dd');
+          endStr = format(seasonEnd, 'yyyy-MM-dd');
+          break;
+        case 'daily':
+          startStr = format(start, 'yyyy-MM-dd');
+          endStr = startStr; // Same day for daily view
+          break;
+        case 'period':
+        default:
+          startStr = format(start, 'yyyy-MM-dd');
+          endStr = format(end, 'yyyy-MM-dd');
+      }
+
+      const response = await fetch(
+        `http://localhost:8000/api/counties?start_date=${startStr}&end_date=${endStr}&time_scale=${scale}`
+      );
+      if (!response.ok) throw new Error('Failed to fetch PM2.5 data');
+      return await response.json();
+    } catch (err) {
+      console.error('Error fetching data:', err);
+      throw err;
+    }
+  };
+
+  // Handle date changes
+  const handleDateChange = (type, newDate) => {
+    if (type === 'start') {
+      setStartDate(newDate);
+      // For yearly and daily views, update end date to match
+      if (timeScale === 'yearly' || timeScale === 'daily') {
+        setEndDate(newDate);
+      }
+    } else {
+      setEndDate(newDate);
+    }
+    setPendingUpdate(true);
+  };
+
+  // Handle time scale changes
+  const handleTimeScaleChange = (newScale) => {
+    setTimeScale(newScale);
+    // Reset dates based on new time scale
+    if (newScale === 'yearly' || newScale === 'daily') {
+      setEndDate(startDate);
+    }
+    setPendingUpdate(true);
+  };
+
+  // Handle submit button click
+  const handleSubmit = async () => {
+    if (!map.current || !map.current.isStyleLoaded()) return;
+
+    try {
+      setLoading(true);
+      const data = await fetchData(startDate, endDate, timeScale);
+
+      if (map.current.getSource('pm25')) {
+        map.current.getSource('pm25').setData(data);
+      }
+      setPendingUpdate(false);
+    } catch (err) {
+      console.error('Error updating map data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Initialize map when component mounts
   useEffect(() => {
@@ -76,19 +208,25 @@ const Map = ({ mapboxToken }) => {
       maxWidth: '300px'
     });
 
-    // Load PM2.5 data when map is ready
+    // Load initial data when map is ready
     map.current.on('load', async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/counties');
-        if (!response.ok) throw new Error('Failed to fetch PM2.5 data');
+        const data = await fetchData(startDate, endDate, timeScale);
 
-        const data = await response.json();
+        // Filter out Puerto Rico counties
+        const filteredData = {
+          ...data,
+          features: data.features.filter(feature => {
+            const fips = feature.properties.GEOID || feature.properties.FIPS;
+            return !fips?.toString().startsWith('72');
+          })
+        };
 
         // Add source and layer
         if (map.current) {
           map.current.addSource('pm25', {
             type: 'geojson',
-            data: data,
+            data: filteredData,
             generateId: true
           });
 
@@ -113,63 +251,70 @@ const Map = ({ mapboxToken }) => {
             if (e.features.length > 0) {
               const feature = e.features[0];
               const props = feature.properties;
+              const countyId = props.GEOID || props.FIPS;
 
-              // Prepare chart data for 2021–2023
-              const chartData = [2021, 2022, 2023].map(year => {
-                // Get the data for this year
-                const total = Number(props[`pm25_${year}_total`] || 0);
-                const fire = Number(props[`pm25_${year}_fire`] || 0);
-                // const nonFire = Number(props[`pm25_${year}_nonfire`] || 0);
+              // Only update if we're hovering over a different county
+              if (currentCountyRef.current !== countyId) {
+                currentCountyRef.current = countyId;
 
-                // Ensure values are valid
-                const validFire = Math.max(0, Math.min(fire, total));
-                const validNonFire = Math.max(0, total - validFire);
+                // Prepare chart data for 2021–2023
+                const chartData = [2021, 2022, 2023].map(year => {
+                  // Get the data for this year
+                  const total = Number(props[`pm25_${year}_total`] || 0);
+                  const fire = Number(props[`pm25_${year}_fire`] || 0);
 
-                return {
-                  year,
-                  fire: validFire,
-                  nonFire: validNonFire
-                };
-              });
+                  // Ensure values are valid
+                  const validFire = Math.max(0, Math.min(fire, total));
+                  const validNonFire = Math.max(0, total - validFire);
 
-              // Create a DOM node for React rendering
-              const popupNode = document.createElement('div');
+                  return {
+                    year,
+                    fire: validFire,
+                    nonFire: validNonFire
+                  };
+                });
 
-              // Add county name above chart
-              const nameDiv = document.createElement('div');
-              nameDiv.style.fontWeight = 'bold';
-              nameDiv.style.fontSize = '1.1em';
-              nameDiv.style.marginBottom = '8px';
-              nameDiv.textContent = props.county_name || props.NAME || 'Unknown County';
-              popupNode.appendChild(nameDiv);
+                // Create a DOM node for React rendering
+                const popupNode = document.createElement('div');
 
-              // Add PM2.5 values
-              const valuesDiv = document.createElement('div');
-              valuesDiv.style.marginBottom = '8px';
-              valuesDiv.style.fontSize = '0.9em';
-              valuesDiv.innerHTML = `
-                <div style="margin-top: 8px; border-top: 1px solid #eee; padding-top: 8px; border-bottom: 1px solid #eee; padding-bottom: 8px;">
-                  <div>Average Population (2021-2023): ${props.avg_population?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || 'N/A'}</div>
-                </div>
-                <div>Total PM2.5: ${props.avg_total_pm25?.toFixed(2) || 0} µg/m³</div>
-                <div>Fire PM2.5: ${props.fire_pm25?.toFixed(2) || 0} µg/m³</div>
-                <div>Non-fire PM2.5: ${(props.avg_total_pm25 - props.fire_pm25)?.toFixed(2) || 0} µg/m³</div>
-              `;
-              popupNode.appendChild(valuesDiv);
+                // Add county name above chart
+                const nameDiv = document.createElement('div');
+                nameDiv.style.fontWeight = 'bold';
+                nameDiv.style.fontSize = '1.1em';
+                nameDiv.style.marginBottom = '8px';
+                const stateAbbr = getStateFromFIPS(countyId);
+                nameDiv.textContent = `${props.county_name || props.NAME || 'Unknown County'}, ${stateAbbr}`;
+                popupNode.appendChild(nameDiv);
 
-              // Render chart
-              const chartDiv = document.createElement('div');
-              chartDiv.style.width = '250px';
-              chartDiv.style.height = '180px';
-              popupNode.appendChild(chartDiv);
-              const root = createRoot(chartDiv);
-              root.render(<CountyBarChart data={chartData} />);
+                // Add PM2.5 values
+                const valuesDiv = document.createElement('div');
+                valuesDiv.style.marginBottom = '8px';
+                valuesDiv.style.fontSize = '0.9em';
+                valuesDiv.innerHTML = `
+                  <div>Population (2021-2023): ${props.avg_population?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || 'N/A'}</div>
+                  <div>Total PM2.5: ${props.avg_total_pm25?.toFixed(2) || 0} µg/m³</div>
+                  <div>Fire PM2.5: ${props.fire_pm25?.toFixed(2) || 0} µg/m³</div>
+                  <div>Non-fire PM2.5: ${(props.avg_total_pm25 - props.fire_pm25)?.toFixed(2) || 0} µg/m³</div>
+                `;
+                popupNode.appendChild(valuesDiv);
 
-              map.current.getCanvas().style.cursor = 'pointer';
-              popup
-                .setLngLat(e.lngLat)
-                .setDOMContent(popupNode)
-                .addTo(map.current);
+                // Render chart
+                const chartDiv = document.createElement('div');
+                chartDiv.style.width = '250px';
+                chartDiv.style.height = '180px';
+                popupNode.appendChild(chartDiv);
+                const root = createRoot(chartDiv);
+                root.render(<CountyBarChart data={chartData} />);
+
+                map.current.getCanvas().style.cursor = 'pointer';
+                popup
+                  .setLngLat(e.lngLat)
+                  .setDOMContent(popupNode)
+                  .addTo(map.current);
+              } else {
+                // Just update the popup position for the same county
+                popup.setLngLat(e.lngLat);
+              }
             }
           });
 
@@ -177,6 +322,7 @@ const Map = ({ mapboxToken }) => {
           map.current.on('mouseleave', 'pm25-layer', () => {
             map.current.getCanvas().style.cursor = '';
             popup.remove();
+            currentCountyRef.current = null;  // Reset current county
           });
 
           // Set loading to false when data is loaded
@@ -185,6 +331,8 @@ const Map = ({ mapboxToken }) => {
       } catch (err) {
         console.error('Error loading PM2.5 data:', err);
         setError('Failed to load PM2.5 data');
+      } finally {
+        setLoading(false);
       }
     });
 
@@ -205,7 +353,7 @@ const Map = ({ mapboxToken }) => {
         map.current = null;
       }
     };
-  }, [mapboxToken]);
+  }, [mapboxToken, stateAbbr]);
 
   // Update layer when activeLayer changes
   useEffect(() => {
@@ -287,6 +435,32 @@ const Map = ({ mapboxToken }) => {
           height: '100%'
         }}
       />
+
+      {/* Date Range Selector */}
+      <div style={{
+        position: 'absolute',
+        top: '20px',
+        left: '20px',
+        backgroundColor: 'white',
+        padding: '10px',
+        borderRadius: '4px',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+        zIndex: 1
+      }}>
+        <DateRangeSelector
+          startDate={startDate}
+          endDate={endDate}
+          onDateChange={handleDateChange}
+          onSubmit={handleSubmit}
+          timeScale={timeScale}
+          onTimeScaleChange={handleTimeScaleChange}
+        />
+        {pendingUpdate && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            Changes pending. Click "Update Map" to apply.
+          </Typography>
+        )}
+      </div>
 
       {/* Layer Toggle */}
       <div style={{
