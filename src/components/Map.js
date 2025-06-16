@@ -58,6 +58,7 @@ const Map = ({ mapboxToken, stateAbbr }) => {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeLayer, setActiveLayer] = useState('avg_total_pm25');
+  const [activePm25Type, setActivePm25Type] = useState('total'); // 'total', 'fire', or 'nonfire'
   const [startDate, setStartDate] = useState(new Date('2021-01-01'));
   const [endDate, setEndDate] = useState(new Date('2023-12-31'));
   const [timeScale, setTimeScale] = useState('period');
@@ -188,9 +189,9 @@ const Map = ({ mapboxToken, stateAbbr }) => {
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/light-v10',
       bounds: [
-        -125.0,  // West
+        -150.0,  // West
         24.0,    // South
-        -66.0,   // East
+        -60.0,   // East
         50.0     // North
       ],
       padding: { top: 20, bottom: 20, left: 20, right: 20 }
@@ -205,7 +206,7 @@ const Map = ({ mapboxToken, stateAbbr }) => {
     const popup = new mapboxgl.Popup({
       closeButton: false,
       closeOnClick: false,
-      maxWidth: '300px'
+      maxWidth: '400px'
     });
 
     // Load initial data when map is ready
@@ -213,13 +214,25 @@ const Map = ({ mapboxToken, stateAbbr }) => {
       try {
         const data = await fetchData(startDate, endDate, timeScale);
 
-        // Filter out Puerto Rico counties
+        // Filter out Puerto Rico counties and calculate nonfire_pm25 if needed
         const filteredData = {
           ...data,
-          features: data.features.filter(feature => {
+          features: data.features.map(feature => {
             const fips = feature.properties.GEOID || feature.properties.FIPS;
-            return !fips?.toString().startsWith('72');
-          })
+            // Skip Puerto Rico counties
+            if (fips?.toString().startsWith('72')) return null;
+            
+            // Calculate nonfire_pm25 if not present
+            const props = { ...feature.properties };
+            if (props.avg_total_pm25 !== undefined && props.fire_pm25 !== undefined) {
+              props.nonfire_pm25 = Math.max(0, props.avg_total_pm25 - (props.fire_pm25 || 0));
+            }
+            
+            return {
+              ...feature,
+              properties: props
+            };
+          }).filter(Boolean) // Remove null entries (Puerto Rico)
         };
 
         // Add source and layer
@@ -230,6 +243,20 @@ const Map = ({ mapboxToken, stateAbbr }) => {
             generateId: true
           });
 
+          // Helper function to get the appropriate color scale based on PM2.5 type
+          const getColorScale = (type) => {
+            switch(type) {
+              case 'fire':
+                return PM25_COLORS_FIRE;
+              case 'nonfire':
+                return PM25_COLORS_TOTAL; // Same as total for consistency
+              case 'total':
+              default:
+                return PM25_COLORS_TOTAL;
+            }
+          };
+
+          // Add the fill layer for PM2.5
           map.current.addLayer({
             id: 'pm25-layer',
             type: 'fill',
@@ -238,8 +265,12 @@ const Map = ({ mapboxToken, stateAbbr }) => {
               'fill-color': [
                 'interpolate',
                 ['linear'],
-                ['get', activeLayer],
-                ...(activeLayer === 'fire_pm25' ? PM25_COLORS_FIRE : PM25_COLORS_TOTAL).reduce((acc, [value, color]) => acc.concat(value, color), [])
+                ['get', activeLayer === 'avg_population' ? 'avg_population' : 
+                  activePm25Type === 'fire' ? 'fire_pm25' : 
+                  activePm25Type === 'nonfire' ? 'nonfire_pm25' : 'avg_total_pm25'],
+                ...(activeLayer === 'avg_population' ? POPULATION_COLORS : 
+                   activePm25Type === 'fire' ? PM25_COLORS_FIRE : PM25_COLORS_TOTAL)
+                  .reduce((acc, [value, color]) => acc.concat(value, color), [])
               ],
               'fill-opacity': 0.8,
               'fill-outline-color': 'rgba(0,0,0,0.2)'
@@ -257,22 +288,59 @@ const Map = ({ mapboxToken, stateAbbr }) => {
               if (currentCountyRef.current !== countyId) {
                 currentCountyRef.current = countyId;
 
-                // Prepare chart data for 2021–2023
-                const chartData = [2021, 2022, 2023].map(year => {
-                  // Get the data for this year
-                  const total = Number(props[`pm25_${year}_total`] || 0);
-                  const fire = Number(props[`pm25_${year}_fire`] || 0);
+                // Debug: Log all available properties
+                console.log('Available properties:', Object.keys(props).sort());
+                
+                // Prepare chart data for 2013–2023
+                const chartData = [];
+                console.log('All properties for this county:', props);
+                
+                // Log all PM2.5 related properties
+                const pm25Props = Object.keys(props).filter(key => key.startsWith('pm25_'));
+                console.log('All PM2.5 properties:', pm25Props);
+                
+                for (let year = 2013; year <= 2023; year++) {
+                  // Get all possible property names for this year
+                  const totalKey = `pm25_${year}_total`;
+                  const fireKey = `pm25_${year}_fire`;
+                  const nonfireKey = `pm25_${year}_nonfire`;
+                  
+                  // Log raw values before any processing
+                  console.log(`\nYear ${year} raw values:`, {
+                    [totalKey]: props[totalKey],
+                    [fireKey]: props[fireKey],
+                    [nonfireKey]: props[nonfireKey]
+                  });
+                  
+                  // Get values with debug logging
+                  const total = Number(props[totalKey] || 0);
+                  const fire = Number(props[fireKey] || 0);
+                  const nonfire = Number(props[nonfireKey] || (total - fire));
+                  
+                  // Ensure values are valid and non-negative
+                  const validFire = Math.max(0, fire);
+                  const validNonFire = Math.max(0, nonfire);
+                  
+                  // Debug log the values
+                  console.log(`Year ${year} processed values:`, { 
+                    total, 
+                    fire, 
+                    nonfire,
+                    validFire,
+                    validNonFire,
+                    totalExists: totalKey in props,
+                    fireExists: fireKey in props,
+                    nonfireExists: nonfireKey in props
+                  });
 
-                  // Ensure values are valid
-                  const validFire = Math.max(0, Math.min(fire, total));
-                  const validNonFire = Math.max(0, total - validFire);
-
-                  return {
+                  chartData.push({
                     year,
                     fire: validFire,
                     nonFire: validNonFire
-                  };
-                });
+                  });
+                }
+                
+                console.log('Final chart data:', chartData);
 
                 // Create a DOM node for React rendering
                 const popupNode = document.createElement('div');
@@ -290,17 +358,21 @@ const Map = ({ mapboxToken, stateAbbr }) => {
                 const valuesDiv = document.createElement('div');
                 valuesDiv.style.marginBottom = '8px';
                 valuesDiv.style.fontSize = '0.9em';
+                const totalPm25 = props.avg_total_pm25 || 0;
+                const firePm25 = props.fire_pm25 || 0;
+                const nonfirePm25 = props.nonfire_pm25 || Math.max(0, totalPm25 - firePm25);
+                
                 valuesDiv.innerHTML = `
-                  <div>Population (2021-2023): ${props.avg_population?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || 'N/A'}</div>
-                  <div>Total PM2.5: ${props.avg_total_pm25?.toFixed(2) || 0} µg/m³</div>
-                  <div>Fire PM2.5: ${props.fire_pm25?.toFixed(2) || 0} µg/m³</div>
-                  <div>Non-fire PM2.5: ${(props.avg_total_pm25 - props.fire_pm25)?.toFixed(2) || 0} µg/m³</div>
+                  <div>Population: ${props.avg_population?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || 'N/A'}</div>
+                  <div>Total PM2.5: ${totalPm25.toFixed(2)} µg/m³</div>
+                  <div>Fire PM2.5: ${firePm25.toFixed(2)} µg/m³ (${(firePm25 / (totalPm25 || 1) * 100).toFixed(1)}%)</div>
+                  <div>Non-fire PM2.5: ${nonfirePm25.toFixed(2)} µg/m³ (${(nonfirePm25 / (totalPm25 || 1) * 100).toFixed(1)}%)</div>
                 `;
                 popupNode.appendChild(valuesDiv);
 
                 // Render chart
                 const chartDiv = document.createElement('div');
-                chartDiv.style.width = '250px';
+                chartDiv.style.width = '350px';
                 chartDiv.style.height = '180px';
                 popupNode.appendChild(chartDiv);
                 const root = createRoot(chartDiv);
@@ -355,47 +427,57 @@ const Map = ({ mapboxToken, stateAbbr }) => {
     };
   }, [mapboxToken, stateAbbr]);
 
-  // Update layer when activeLayer changes
+  // Update layer when activeLayer or activePm25Type changes
   useEffect(() => {
-    if (map.current && map.current.isStyleLoaded() && map.current.getLayer('pm25-layer')) {
-      let currentColors;
-      let paintStops;
+    if (!map.current || !map.current.isStyleLoaded() || !map.current.getLayer('pm25-layer')) {
+      return;
+    }
 
-      if (activeLayer === 'fire_pm25') {
-        currentColors = PM25_COLORS_FIRE;
-      } else if (activeLayer === 'avg_total_pm25') {
-        currentColors = PM25_COLORS_TOTAL;
-      } else if (activeLayer === 'avg_population') {
-        currentColors = POPULATION_COLORS;
-      }
+    // Determine the field name based on the selected layer type
+    let fieldName;
+    let colors;
+    
+    if (activeLayer === 'avg_population') {
+      fieldName = 'avg_population';
+      colors = POPULATION_COLORS;
+    } else {
+      // For PM2.5 layers, determine which field to use based on activePm25Type
+      fieldName = activePm25Type === 'fire' ? 'fire_pm25' : 
+                activePm25Type === 'nonfire' ? 'nonfire_pm25' : 'avg_total_pm25';
+      colors = activePm25Type === 'fire' ? PM25_COLORS_FIRE : PM25_COLORS_TOTAL;
+    }
 
-      paintStops = currentColors.reduce((acc, [value, color]) => acc.concat(value, color), []);
+    // Create the paint stops for the color scale
+    const paintStops = colors.reduce((acc, [value, color]) => acc.concat(value, color), []);
 
-      map.current.setPaintProperty('pm25-layer', 'fill-color', [
-        'interpolate',
-        ['linear'],
-        ['get', activeLayer],
-        ...paintStops
-      ]);
+    // Update the map layer
+    map.current.setPaintProperty('pm25-layer', 'fill-color', [
+      'interpolate',
+      ['linear'],
+      ['get', fieldName],
+      ...paintStops
+    ]);
 
-      // Update the legend title
-      const legendEl = document.getElementById('pm25-legend');
-      if (legendEl) {
-        const titleEl = legendEl.querySelector('div:first-child');
-        if (titleEl) {
-          let title = '';
-          if (activeLayer === 'avg_total_pm25') {
-            title = 'Total PM2.5 (μg/m³)';
-          } else if (activeLayer === 'fire_pm25') {
-            title = 'Fire PM2.5 (μg/m³)';
-          } else if (activeLayer === 'avg_population') {
-            title = 'Population';
-          }
-          titleEl.textContent = title;
+    // Update the legend title
+    const legendEl = document.getElementById('pm25-legend');
+    if (legendEl) {
+      const titleEl = legendEl.querySelector('div:first-child');
+      if (titleEl) {
+        let title = '';
+        if (activeLayer === 'avg_population') {
+          title = 'Population';
+        } else {
+          const typeMap = {
+            'total': 'Total PM2.5',
+            'fire': 'Fire PM2.5',
+            'nonfire': 'Non-fire PM2.5'
+          };
+          title = `${typeMap[activePm25Type]} (μg/m³)`;
         }
+        titleEl.textContent = title;
       }
     }
-  }, [activeLayer]);
+  }, [activeLayer, activePm25Type]);
 
   if (error) {
     return (
@@ -471,39 +553,72 @@ const Map = ({ mapboxToken, stateAbbr }) => {
         padding: '10px',
         borderRadius: '4px',
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-        zIndex: 1
+        zIndex: 1,
+        width: '200px'
       }}>
         <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Map Layer</div>
-        <label style={{ display: 'block', marginBottom: '5px' }}>
-          <input
-            type="radio"
-            name="layer"
-            checked={activeLayer === 'avg_total_pm25'}
-            onChange={() => setActiveLayer('avg_total_pm25')}
-            style={{ marginRight: '5px' }}
-          />
-          Total PM2.5
-        </label>
-        <label style={{ display: 'block', marginBottom: '5px' }}>
-          <input
-            type="radio"
-            name="layer"
-            checked={activeLayer === 'fire_pm25'}
-            onChange={() => setActiveLayer('fire_pm25')}
-            style={{ marginRight: '5px' }}
-          />
-          Fire-related PM2.5
-        </label>
-        <label style={{ display: 'block' }}>
-          <input
-            type="radio"
-            name="layer"
-            checked={activeLayer === 'avg_population'}
-            onChange={() => setActiveLayer('avg_population')}
-            style={{ marginRight: '5px' }}
-          />
-          Population
-        </label>
+        
+        {/* Data Type Selection */}
+        <div style={{ marginBottom: '10px' }}>
+          <div style={{ marginBottom: '5px', fontWeight: '500' }}>Data Type:</div>
+          <label style={{ display: 'block', marginBottom: '5px' }}>
+            <input
+              type="radio"
+              name="dataType"
+              checked={activeLayer === 'avg_total_pm25'}
+              onChange={() => setActiveLayer('avg_total_pm25')}
+              style={{ marginRight: '5px' }}
+            />
+            PM2.5
+          </label>
+          <label style={{ display: 'block', marginBottom: '5px' }}>
+            <input
+              type="radio"
+              name="dataType"
+              checked={activeLayer === 'avg_population'}
+              onChange={() => setActiveLayer('avg_population')}
+              style={{ marginRight: '5px' }}
+            />
+            Population
+          </label>
+        </div>
+
+        {/* PM2.5 Type Selection (only shown when PM2.5 is selected) */}
+        {activeLayer !== 'avg_population' && (
+          <div style={{ marginTop: '10px', borderTop: '1px solid #eee', paddingTop: '10px' }}>
+            <div style={{ marginBottom: '5px', fontWeight: '500' }}>PM2.5 Type:</div>
+            <label style={{ display: 'block', marginBottom: '5px' }}>
+              <input
+                type="radio"
+                name="pm25Type"
+                checked={activePm25Type === 'total'}
+                onChange={() => setActivePm25Type('total')}
+                style={{ marginRight: '5px' }}
+              />
+              Total
+            </label>
+            <label style={{ display: 'block', marginBottom: '5px' }}>
+              <input
+                type="radio"
+                name="pm25Type"
+                checked={activePm25Type === 'fire'}
+                onChange={() => setActivePm25Type('fire')}
+                style={{ marginRight: '5px' }}
+              />
+              Fire
+            </label>
+            <label style={{ display: 'block' }}>
+              <input
+                type="radio"
+                name="pm25Type"
+                checked={activePm25Type === 'nonfire'}
+                onChange={() => setActivePm25Type('nonfire')}
+                style={{ marginRight: '5px' }}
+              />
+              Non-fire
+            </label>
+          </div>
+        )}
       </div>
 
       {/* Legend */}
@@ -522,19 +637,43 @@ const Map = ({ mapboxToken, stateAbbr }) => {
         }}
       >
         <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>
-          {activeLayer === 'avg_total_pm25' ? 'Total PM2.5 (μg/m³)' :
-            activeLayer === 'fire_pm25' ? 'Fire PM2.5 (μg/m³)' :
-              'Population'}
+          {activeLayer === 'avg_population' ? 'Population' : 
+           `${activePm25Type === 'total' ? 'Total' : activePm25Type === 'fire' ? 'Fire' : 'Non-fire'} PM2.5 (μg/m³)`}
         </div>
         {(() => {
-          const colors = activeLayer === 'fire_pm25' ? PM25_COLORS_FIRE :
-            activeLayer === 'avg_total_pm25' ? PM25_COLORS_TOTAL :
-              POPULATION_COLORS;
+          // Determine which color scale to use based on the active layer and PM2.5 type
+          const colors = activeLayer === 'avg_population' 
+            ? POPULATION_COLORS 
+            : activePm25Type === 'fire' 
+              ? PM25_COLORS_FIRE 
+              : PM25_COLORS_TOTAL;
 
+          // Special handling for population values (show full numbers)
+          if (activeLayer === 'avg_population') {
+            return colors.map(([value, color], i, arr) => {
+              const label = i === arr.length - 1
+                ? `${value.toLocaleString()}+`
+                : `${value.toLocaleString()} - ${arr[i + 1][0].toLocaleString()}`;
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '2px' }}>
+                  <div style={{
+                    width: '20px',
+                    height: '15px',
+                    backgroundColor: color,
+                    marginRight: '5px',
+                    border: '1px solid #999'
+                  }}></div>
+                  <span>{label}</span>
+                </div>
+              );
+            });
+          }
+          
+          // For PM2.5 values (show with one decimal place)
           return colors.map(([value, color], i, arr) => {
             const label = i === arr.length - 1
-              ? `${value.toLocaleString()}+`
-              : `${value.toLocaleString()} - ${arr[i + 1][0].toLocaleString()}`;
+              ? `${value.toFixed(1)}+`
+              : `${value.toFixed(1)} - ${arr[i + 1][0].toFixed(1)}`;
 
             return (
               <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '2px' }}>
@@ -545,7 +684,7 @@ const Map = ({ mapboxToken, stateAbbr }) => {
                   marginRight: '5px',
                   border: '1px solid #999'
                 }}></div>
-                <span>{label}</span>
+                <span>{label} {activeLayer !== 'avg_population' ? '' : ''}</span>
               </div>
             );
           });
