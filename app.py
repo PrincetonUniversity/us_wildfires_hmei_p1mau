@@ -1,16 +1,114 @@
-from fastapi import FastAPI, HTTPException, Query
+import logging
+from contextlib import asynccontextmanager
+from datetime import datetime, date, timedelta
+from pathlib import Path
+from typing import Optional, List, Dict, Any
+import os
+import numpy as np
+import pandas as pd
+from fastapi import FastAPI, HTTPException, Query, Depends, status, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-import geopandas as gpd
-import pandas as pd
-from pathlib import Path
-from datetime import datetime
-from typing import Optional
-import numpy as np
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.encoders import jsonable_encoder
+from sqlalchemy import func, and_, or_, extract, select
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.sql.expression import case
 
-# Initialize FastAPI app
-app = FastAPI(title="PM2.5 Wildfire Dashboard")
+# Application imports
+from db.database import SessionLocal, engine, Base
+from db.models import DailyPM25, County, Population
+
+import geopandas as gpd
+from shapely.geometry import mapping, shape
+import warnings
+
+# Suppress warnings from GeoPandas
+warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
+
+# Load county geometries once at startup
+COUNTY_GEOMETRIES = None
+
+def load_county_geometries():
+    """Load county geometries from the shapefile and cache them."""
+    global COUNTY_GEOMETRIES
+    if COUNTY_GEOMETRIES is None:
+        try:
+            # Path to the county boundaries shapefile
+            shapefile_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                'data', 'shapefiles', 'cb_2018_us_county_20m.shp'
+            )
+            
+            # Read the shapefile
+            gdf = gpd.read_file(shapefile_path)
+            
+            # Create a FIPS code column by combining state and county codes
+            gdf['FIPS'] = gdf['STATEFP'] + gdf['COUNTYFP']
+            
+            # Convert to GeoJSON and index by FIPS code
+            COUNTY_GEOMETRIES = {}
+            for _, row in gdf.iterrows():
+                # Convert the row to a GeoJSON feature
+                feature = {
+                    'type': 'Feature',
+                    'geometry': mapping(row['geometry']),
+                    'properties': {
+                        'FIPS': row['FIPS'],
+                        'NAME': row.get('NAME', ''),
+                        'STATEFP': row.get('STATEFP', ''),
+                        'COUNTYFP': row.get('COUNTYFP', '')
+                    }
+                }
+                COUNTY_GEOMETRIES[row['FIPS']] = feature['geometry']
+            
+            logger.info(f"Loaded {len(COUNTY_GEOMETRIES)} county geometries")
+            
+        except Exception as e:
+            logger.error(f"Error loading county geometries: {str(e)}", exc_info=True)
+            COUNTY_GEOMETRIES = {}
+    
+    return COUNTY_GEOMETRIES
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('app.log')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Create database tables if they don't exist
+Base.metadata.create_all(bind=engine)
+
+# Cache configuration
+CACHE_TTL = 300  # 5 minutes
+
+# Application lifespan
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize resources
+    logger.info("Starting up...")
+    
+    # Create database tables if they don't exist
+    Base.metadata.create_all(bind=engine)
+    
+    yield
+    
+    # Shutdown: Clean up resources
+    logger.info("Shutting down...")
+
+# Initialize FastAPI app with lifespan
+app = FastAPI(
+    title="PM2.5 Wildfire Dashboard",
+    description="API for accessing PM2.5 wildfire data",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 # Configure CORS
 app.add_middleware(
@@ -29,552 +127,485 @@ POPULATION_CSV = DATA_DIR + "population_2021_2023.csv"
 FIPS_CSV = DATA_DIR + "FIPScode.csv"
 DAILY_DATA_CSV = DATA_DIR + "daily_county_data_combined.csv"
 
-def load_data(pm25_csv_path=None, counties_shp_path=None):
-    """Load and process PM2.5 and counties data
+# Database session dependency
+def get_db():
+    """Dependency that provides a DB session."""
+    db = SessionLocal()
+    try:
+        yield db
+    except SQLAlchemyError as e:
+        logger.error(f"Database error: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error occurred"
+        )
+    finally:
+        db.close()
+
+def get_season_date_range(year: int, season: str):
+    season = season.lower()
+    if season == "winter":
+        start_date = date(year-1, 12, 21)
+        end_date = date(year, 3, 20)
+    elif season == "spring":
+        start_date = date(year, 3, 21)
+        end_date = date(year, 6, 20)
+    elif season == "summer":
+        start_date = date(year, 6, 21)
+        end_date = date(year, 9, 20)
+    elif season == "fall":
+        start_date = date(year, 9, 21)
+        end_date = date(year, 12, 20)
+    else:
+        raise ValueError("Invalid season")
+    return start_date, end_date
+
+
+
+# Helper function to parse and validate date input
+def parse_flexible_date(date_str: str) -> date:
+    """Parse a date string into a date object with flexible format."""
+    try:
+        if len(date_str) == 4:  # Just year (e.g., '2023')
+            return datetime.strptime(f"{date_str}-01-01", "%Y-%m-%d").date()
+        elif len(date_str) == 7:  # Year and month (e.g., '2023-01')
+            return datetime.strptime(f"{date_str}-01", "%Y-%m-%d").date()
+        else:  # Full date (e.g., '2023-01-01')
+            return datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {date_str}. Use YYYY, YYYY-MM, or YYYY-MM-DD."
+        ) from e
+
+
+# Helper function to parse and validate date input
+def parse_date(date_str: str) -> date:
+    """Parse date string to date object with validation."""
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError as e:
+        logger.warning(f"Invalid date format: {date_str}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {date_str}. Use YYYY-MM-DD."
+        ) from e
+
+# Cache for frequently accessed data
+from functools import lru_cache
+
+@lru_cache(maxsize=1000)
+def get_cached_pm25_data(
+    fips: str,
+    start_date: date,
+    end_date: date,
+    period: str
+) -> List[Dict[str, Any]]:
+    """Get PM2.5 data with caching for better performance."""
+    db = SessionLocal()
+    try:
+        # Base query with correct column names from our schema
+        query = db.query(
+            extract('year', DailyPM25.date).label("year"),
+            extract('month', DailyPM25.date).label("month"),
+            extract('day', DailyPM25.date).label("day"),
+            func.avg(DailyPM25.total).label("avg_total_pm25"),
+            func.avg(DailyPM25.fire).label("avg_fire_pm25"),
+        ).filter(
+            DailyPM25.fips == fips,
+            DailyPM25.date.between(start_date, end_date)
+        )
+        
+        # Apply grouping based on period
+        if period == "yearly":
+            query = query.group_by(extract('year', DailyPM25.date))
+        elif period == "monthly":
+            query = query.group_by(
+                extract('year', DailyPM25.date),
+                extract('month', DailyPM25.date)
+            )
+        
+        results = query.order_by("year", "month", "day").all()
+        
+        return [
+            {
+                "year": int(r.year) if r.year else None,
+                "month": int(r.month) if hasattr(r, 'month') and r.month is not None else None,
+                "day": int(r.day) if hasattr(r, 'day') and r.day is not None else None,
+                "avg_total_pm25": float(r.avg_total_pm25) if r.avg_total_pm25 is not None else None,
+                "avg_fire_pm25": float(r.avg_fire_pm25) if r.avg_fire_pm25 is not None else None,
+                "avg_nonfire_pm25": float(r.avg_total_pm25 - r.avg_fire_pm25) 
+                    if r.avg_total_pm25 is not None and r.avg_fire_pm25 is not None 
+                    else None,
+            }
+            for r in results
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching PM2.5 data: {str(e)}", exc_info=True)
+        raise
+    finally:
+        db.close()
+
+@app.get("/api/pm25/{fips}", response_model=Dict[str, Any])
+async def get_pm25(
+    request: Request,
+    fips: str,
+    period: str = Query("yearly", pattern="^(daily|monthly|seasonal|yearly|custom)$"),
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    season: Optional[str] = None,
+    year: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Get PM2.5 data for a specific county and time period.
     
-    Args:
-        pm25_csv_path (str, optional): Path to PM2.5 CSV file. Defaults to None.
-        counties_shp_path (str, optional): Path to counties shapefile. Defaults to None.
+    Parameters:
+    - fips: County FIPS code
+    - period: Time period aggregation ('daily', 'monthly', 'seasonal', 'yearly', 'custom')
+    - start_date: Start date (YYYY, YYYY-MM, or YYYY-MM-DD), required for 'custom' period
+    - end_date: End date (YYYY, YYYY-MM, or YYYY-MM-DD), required for 'custom' period
+    - season: Season name (e.g., 'winter', 'spring', 'summer', 'fall'), required for 'seasonal' period
+    - year: Year (YYYY), required for 'seasonal' period
+    
+    Returns:
+    - JSON response with PM2.5 data and metadata
     """
     try:
-        # Use provided path or fall back to module-level constant
-        daily_path = pm25_csv_path or DAILY_DATA_CSV
-        counties_path = counties_shp_path or COUNTIES_SHP
-        
-        print(f"Loading PM2.5 data from: {daily_path}")
-        try:
-            pm25 = pd.read_csv(daily_path, encoding='utf-8')
-            counties = gpd.read_file(counties_path)
-            print("PM2.5 and counties data loaded successfully")
-        except Exception as e:
-            print(f"Error loading data: {str(e)}")
-            raise
-
-        print("Loading population data...")
-        population = pd.read_csv(POPULATION_CSV)
-        print("Population data loaded")
-
-        # Standardize column names to lowercase for easier access
-        pm25.columns = [c.lower() for c in pm25.columns]
-        
-        # Ensure FIPS code is properly formatted and create FIPS_code column
-        if 'fips' in pm25.columns:
-            pm25['fips'] = pm25['fips'].astype(str).str.zfill(5)
-            pm25['FIPS_code'] = pm25['fips']
-        
-        # Create date column from year, month, day
-        if all(col in pm25.columns for col in ['year', 'month', 'day']):
-            pm25['date'] = pd.to_datetime(pm25[['year', 'month', 'day']])
-        
-        # Load FIPS lookup for county names
-        fips_lookup = pd.read_csv(FIPS_CSV, header=None, names=['FIPS_code', 'county_name'])
-        fips_lookup['FIPS_code'] = fips_lookup['FIPS_code'].astype(str).str.zfill(5)
-        
-        # Process population data
-        print("Processing population data...")
-        # Ensure population data has FIPS_code column
-        if 'FIPS_code' not in population.columns and 'fips' in population.columns:
-            population['FIPS_code'] = population['fips'].astype(str).str.zfill(5)
-        
-        # If we still don't have FIPS_code, try to use county_index if it exists
-        if 'FIPS_code' not in population.columns and 'county_index' in population.columns:
-            # Create a mapping from county_index to FIPS_code from the pm25 data
-            if 'countyindex' in pm25.columns and 'fips' in pm25.columns:
-                index_to_fips = pm25.drop_duplicates('countyindex')[['countyindex', 'fips']]
-                index_to_fips = index_to_fips.dropna()
-                if not index_to_fips.empty:
-                    population = population.merge(
-                        index_to_fips.rename(columns={'fips': 'FIPS_code'}),
-                        left_on='county_index',
-                        right_on='countyindex',
-                        how='left'
-                    )
-        
-        # Ensure FIPS_code is properly formatted
-        if 'FIPS_code' in population.columns:
-            population['FIPS_code'] = population['FIPS_code'].astype(str).str.zfill(5)
-            
-        # Merge with county names
-        if 'FIPS_code' in population.columns:
-            population = population.merge(
-                fips_lookup[['FIPS_code', 'county_name']],
-                on='FIPS_code',
-                how='left'
+        # Validate FIPS code exists
+        county = db.query(County).filter(County.fips == fips).first()
+        if not county:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"County with FIPS code {fips} not found"
             )
-        else:
-            print("Warning: Could not determine FIPS codes for population data")
         
-        # Calculate average population, ignoring zeros
-        population_avg = (
-            population[population['population'] > 0]
-            .groupby('FIPS_code')['population']
-            .mean()
-            .reset_index(name='avg_population')
-        )
+        # Handle different time periods
+        if period == "custom":
+            if not start_date or not end_date:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="start_date and end_date are required for custom period"
+                )
+                
+            # Parse dates with flexible format
+            start = parse_flexible_date(start_date)
+            end = parse_flexible_date(end_date)
+            
+            # Adjust end date based on input format
+            if len(end_date) == 4:  # Year only
+                end = datetime(end.year, 12, 31).date()
+            elif len(end_date) == 7:  # Year and month
+                next_month = datetime(end.year, end.month % 12 + 1, 1) if end.month < 12 else datetime(end.year + 1, 1, 1)
+                end = (next_month - timedelta(days=1)).date()
+            
+            # Ensure end date is not before start date
+            if end < start:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="end_date must be after start_date"
+                )
+                
+            # Get data for the custom date range
+            data = get_cached_pm25_data(fips, start, end, period)
+            
+            return {
+                "fips": fips,
+                "county_name": county.name,
+                "period": "custom",
+                "start_date": start.isoformat(),
+                "end_date": end.isoformat(),
+                "data": data
+            }
+            
+        elif period == "seasonal":
+            if not season or not year:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="season and year are required for seasonal period"
+                )
+            try:
+                start, end = get_season_date_range(year, season)
+            except ValueError as e:
+                logger.warning(f"Invalid season: {season}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid season: {season}. Must be one of: winter, spring, summer, fall"
+                ) from e
 
-        print("Processing daily data for choropleth and bar charts...")
+        elif period == "yearly":
+            # Default to full date range if not specified
+            start = date(2013, 1, 1)
+            end = date(2023, 12, 31)
         
-        # Ensure FIPS/GEOID codes are properly formatted
-        if 'FIPS_code' in pm25.columns:
-            pm25['FIPS_code'] = pm25['FIPS_code'].astype(str).str.zfill(5)
-        counties['GEOID'] = counties['GEOID'].astype(str).str.zfill(5)
+        # Log the request
+        logger.info(f"Fetching PM2.5 data for FIPS: {fips}, Period: {period}, "
+                   f"Start: {start}, End: {end}")
         
-        # Process the daily data for choropleth (average across all years)
-        print("\nProcessing choropleth data...")
-        choropleth_data = pm25.groupby('FIPS_code').agg({
-            'value': 'mean',
-            'fire_pm25': 'mean'
-        }).reset_index()
+        # Get data from cache or database
+        data = get_cached_pm25_data(fips, start, end, period)
         
-        # Rename columns for consistency
-        choropleth_data = choropleth_data.rename(columns={
-            'value': 'avg_total_pm25',
-            'fire_pm25': 'fire_pm25'
-        })
+        if not data:
+            logger.warning(f"No data found for FIPS: {fips} in the specified date range")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No data found for the specified parameters"
+            )
+            
+        return {
+            "period": period,
+            "fips": fips,
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "data": data
+        }
         
-        # Calculate nonfire PM2.5 for choropleth
-        choropleth_data['nonfire_pm25'] = (choropleth_data['avg_total_pm25'] - choropleth_data['fire_pm25']).clip(lower=0)
-        
-        # Process data for bar charts (yearly averages)
-        print("\nProcessing bar chart data...")
-        print("Sample PM2.5 data before aggregation:")
-        print(pm25[['FIPS_code', 'year', 'month', 'day', 'value', 'fire_pm25']].head())
-        
-        # Check for any non-zero values
-        print("\nValue statistics:")
-        print(f"Total rows: {len(pm25)}")
-        print(f"Non-zero values: {(pm25['value'] > 0).sum()}")
-        print(f"Non-zero fire_pm25: {(pm25['fire_pm25'] > 0).sum()}")
-        print(f"Sample values: {pm25['value'].head().values}")
-        print(f"Sample fire_pm25: {pm25['fire_pm25'].head().values}")
-        
-        # Ensure we have the required columns
-        required_columns = ['FIPS_code', 'year', 'value', 'fire_pm25']
-        missing_columns = [col for col in required_columns if col not in pm25.columns]
-        if missing_columns:
-            print(f"Warning: Missing required columns: {missing_columns}")
-        
-        # Group by FIPS and year, calculate mean values
-        bar_df = pm25.groupby(['FIPS_code', 'year'], as_index=False).agg({
-            'value': 'mean',
-            'fire_pm25': 'mean'
-        })
-        
-        print("\nAfter aggregation:")
-        print(bar_df.head())
-        print(f"\nColumns after aggregation: {bar_df.columns.tolist()}")
-        
-        # Calculate nonfire PM2.5 for bar chart
-        bar_df['nonfire'] = (bar_df['value'] - bar_df['fire_pm25']).clip(lower=0)
-        
-        # Rename columns to match expected format
-        bar_df = bar_df.rename(columns={
-            'value': 'total',
-            'fire_pm25': 'fire'
-        })
-        
-        # Ensure values are non-negative
-        bar_df['fire'] = bar_df['fire'].clip(lower=0)
-        bar_df['total'] = bar_df['total'].clip(lower=0)
-        bar_df['nonfire'] = (bar_df['total'] - bar_df['fire']).clip(lower=0)
-        
-        # Debug: Check the final values
-        print("\nBar chart data statistics after processing:")
-        print(f"Total PM2.5 mean: {bar_df['total'].mean()}")
-        print(f"Fire PM2.5 mean: {bar_df['fire'].mean()}")
-        print(f"Nonfire PM2.5 mean: {bar_df['nonfire'].mean()}")
-        print("\nSample of final bar chart data:")
-        print(bar_df.head())
-        
-        print("\nFinal bar chart data:")
-        print(bar_df[['FIPS_code', 'year', 'total', 'fire', 'nonfire']].head())
-        
-        # Create choropleth data frames for merging
-        choropleth_data_total = choropleth_data[['FIPS_code', 'avg_total_pm25']].copy()
-        choropleth_data_fire = choropleth_data[['FIPS_code', 'fire_pm25']].copy()
-        
-        # Sort by year to ensure chronological order
-        bar_df = bar_df.sort_values('year')
-        print("Daily data processed successfully for all years (2013-2023)")
-        
-        print("Pivoting data for merging...")
-        # Ensure year is integer to avoid decimal in column names
-        bar_df['year'] = bar_df['year'].astype(int)
-        
-        # Pivot for easy merge with counties
-        bar_pivot = bar_df.pivot(index='FIPS_code', columns='year')[['total', 'fire', 'nonfire']]
-        # Debug: Print sample of pivoted data
-        print("\nPivoted data sample (first 5 rows):")
-        print(bar_pivot.head())
-        
-        # Ensure column names use integer years (no decimals)
-        bar_pivot.columns = [f'pm25_{int(col[1])}_{col[0]}' for col in bar_pivot.columns]
-        bar_pivot = bar_pivot.reset_index()
-
-        print("\nColumn names after pivot:", bar_pivot.columns.tolist())
-        print("Merging data with counties...")
-        # Ensure consistent FIPS code format
-        print("\nEnsuring consistent FIPS code format...")
-        counties['GEOID'] = counties['GEOID'].astype(str).str.zfill(5)
-        bar_pivot['FIPS_code'] = bar_pivot['FIPS_code'].astype(str).str.zfill(5)
-        
-        print("\nColumns in bar_pivot:", bar_pivot.columns.tolist())
-        print("Sample of bar_pivot data:")
-        print(bar_pivot.head())
-        
-        # Create a copy of counties to avoid modifying the original
-        print("\nMerging bar chart data...")
-        merged = counties.copy()
-        
-        # First, merge the bar chart data with the counties GeoDataFrame
-        merged = merged.merge(
-            bar_pivot,
-            left_on='GEOID',
-            right_on='FIPS_code',
-            how='left',
-            suffixes=('', '_bar')
-        )
-        
-        print("\nAfter merging bar chart data:")
-        print(f"Columns: {len(merged.columns)}")
-        print("Sample PM2.5 columns:", [col for col in merged.columns if 'pm25_' in col][:10])
-        
-        # Then merge choropleth data
-        print("\nMerging choropleth data...")
-        merged = merged.merge(
-            choropleth_data_total[['FIPS_code', 'avg_total_pm25']],
-            left_on='GEOID',
-            right_on='FIPS_code',
-            how='left',
-            suffixes=('', '_total')
-        )
-        
-        merged = merged.merge(
-            choropleth_data_fire[['FIPS_code', 'fire_pm25']],
-            left_on='GEOID',
-            right_on='FIPS_code',
-            how='left',
-            suffixes=('', '_fire')
-        )
-        
-        # Merge average population data
-        print("\nMerging population data...")
-        merged = merged.merge(
-            population_avg,
-            left_on='GEOID',
-            right_on='FIPS_code',
-            how='left',
-            suffixes=('', '_pop')
-        )
-        
-        # Finally merge county names
-        print("\nMerging county names...")
-        merged = merged.merge(
-            fips_lookup[['FIPS_code', 'county_name']],
-            left_on='GEOID',
-            right_on='FIPS_code',
-            how='left',
-            suffixes=('', '_name')
-        )
-        
-        # Clean up duplicate columns carefully
-        print("\nCleaning up duplicate columns...")
-        columns_to_drop = []
-        for suffix in ['_bar', '_name', '_pop', '_fire', '_total']:
-            cols = [col for col in merged.columns if col.endswith(suffix) and col != 'FIPS_code']
-            columns_to_drop.extend(cols)
-        
-        # Only drop columns that exist in the DataFrame
-        columns_to_drop = [col for col in columns_to_drop if col in merged.columns]
-        if columns_to_drop:
-            print(f"Dropping columns: {columns_to_drop}")
-            merged = merged.drop(columns=columns_to_drop)
-        
-        counties = merged
-        
-        # Debug: Check if we still have all PM2.5 columns
-        pm25_cols = [col for col in counties.columns if 'pm25_' in col]
-        print(f"\nFinal PM2.5 columns ({len(pm25_cols)} total):", pm25_cols)
-        print("Sample values for first county:")
-        sample = counties.iloc[0]
-        for col in pm25_cols[:10]:  # Print first 10 PM2.5 columns
-            print(f"{col}: {sample[col]}")
-        
-        # Fill NA with 0 for frontend
-        counties = counties.fillna(0)
-        
-        # Debug: Print sample of data before final processing
-        print("\nSample data before final processing (first county):")
-        sample_fips = counties['GEOID'].iloc[0]
-        sample_data = counties[counties['GEOID'] == sample_fips].iloc[0]
-        
-        # Print all PM2.5 related columns for the sample county
-        pm25_cols = [col for col in counties.columns if 'pm25_' in col]
-        for col in pm25_cols:
-            print(f"{col}: {sample_data[col]}")
-        
-        # Ensure all PM2.5 columns are present and properly formatted
-        for year in range(2013, 2024):
-            for metric in ['total', 'fire', 'nonfire']:
-                col = f'pm25_{year}_{metric}'
-                if col not in counties.columns:
-                    print(f"Warning: Column {col} not found, adding with zeros")
-                    counties[col] = 0
-                counties[col] = pd.to_numeric(counties[col], errors='coerce').fillna(0)
-        
-        # Debug: Print sample of data after processing
-        print("\nSample data after processing (first county):")
-        sample_data = counties[counties['GEOID'] == sample_fips].iloc[0]
-        for col in pm25_cols:
-            print(f"{col}: {sample_data[col]}")
-        
-        print("Data processing completed successfully")
-        return counties
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
-        print(f"Error in load_data: {str(e)}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Log unexpected errors
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        ) from e
+
+@app.get("/api/pm25/bar_chart/{fips}")
+def get_pm25_bar_chart(
+    fips: str,
+    period: str = Query("yearly", pattern="^(daily|monthly|seasonal|yearly|custom)$"),
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    season: Optional[str] = None,
+    year: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    # Reuse date parsing helper
+    def parse_date(s):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d").date()
+        except:
+            raise HTTPException(status_code=400, detail=f"Invalid date format: {s}. Use YYYY-MM-DD.")
+
+    # Determine date range based on period
+    if period in ["custom", "daily", "monthly"]:
+        if not start_date or not end_date:
+            raise HTTPException(status_code=400, detail="start_date and end_date required for this period")
+        start = parse_date(start_date)
+        end = parse_date(end_date)
+        if start > end:
+            raise HTTPException(status_code=400, detail="start_date must be before or equal to end_date")
+
+    elif period == "seasonal":
+        if not season or not year:
+            raise HTTPException(status_code=400, detail="season and year required for seasonal period")
+        try:
+            start, end = get_season_date_range(year, season)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid season")
+
+    elif period == "yearly":
+        start = date(2013, 1, 1)
+        end = date(2023, 12, 31)
+
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported period")
+
+    # Query PM2.5 for the date range and fips
+    query = db.query(
+        extract('year', DailyPM25.date).label("year"),
+        extract('month', DailyPM25.date).label("month"),
+        extract('day', DailyPM25.date).label("day"),
+        func.avg(DailyPM25.total).label("avg_total_pm25"),
+        func.avg(DailyPM25.fire).label("avg_fire_pm25"),
+    ).filter(
+        DailyPM25.fips == fips,
+        DailyPM25.date.between(start, end)
+    )
+
+    # Grouping depends on period
+    if period == "yearly":
+        query = query.group_by(extract('year', DailyPM25.date)).order_by(extract('year', DailyPM25.date))
+        results = query.all()
+        data = [
+            {
+                "year": int(r.year) if r.year else None,
+                "avg_total_pm25": float(r.avg_total_pm25) if r.avg_total_pm25 is not None else None,
+                "avg_fire_pm25": float(r.avg_fire_pm25) if r.avg_fire_pm25 is not None else None,
+                "avg_nonfire_pm25": float(r.avg_total_pm25 - r.avg_fire_pm25) 
+                    if r.avg_total_pm25 is not None and r.avg_fire_pm25 is not None 
+                    else None,
+            } for r in results
+        ]
+
+    elif period == "monthly":
+        query = query.group_by(
+            extract('year', DailyPM25.date),
+            extract('month', DailyPM25.date)
+        ).order_by(
+            extract('year', DailyPM25.date),
+            extract('month', DailyPM25.date)
+        )
+        results = query.all()
+        data = [
+            {
+                "year": int(r.year) if r.year else None,
+                "month": int(r.month) if r.month is not None else None,
+                "avg_total_pm25": float(r.avg_total_pm25) if r.avg_total_pm25 is not None else None,
+                "avg_fire_pm25": float(r.avg_fire_pm25) if r.avg_fire_pm25 is not None else None,
+                "avg_nonfire_pm25": float(r.avg_total_pm25 - r.avg_fire_pm25) 
+                    if r.avg_total_pm25 is not None and r.avg_fire_pm25 is not None 
+                    else None,
+            } for r in results
+        ]
+
+    elif period in ["daily", "seasonal", "custom"]:
+        query = query.group_by(
+            extract('year', DailyPM25.date),
+            extract('month', DailyPM25.date),
+            extract('day', DailyPM25.date)
+        ).order_by(
+            extract('year', DailyPM25.date),
+            extract('month', DailyPM25.date),
+            extract('day', DailyPM25.date)
+        )
+        results = query.all()
+        data = [
+            {
+                "year": int(r.year) if r.year else None,
+                "month": int(r.month) if r.month is not None else None,
+                "day": int(r.day) if r.day is not None else None,
+                "avg_total_pm25": float(r.avg_total_pm25) if r.avg_total_pm25 is not None else None,
+                "avg_fire_pm25": float(r.avg_fire_pm25) if r.avg_fire_pm25 is not None else None,
+                "avg_nonfire_pm25": float(r.avg_total_pm25 - r.avg_fire_pm25) 
+                    if r.avg_total_pm25 is not None and r.avg_fire_pm25 is not None 
+                    else None,
+            } for r in results
+        ]
+
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported period")
+
+    return {"period": period, "fips": fips, "data": data}
+
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Load county geometries when the application starts."""
+    load_county_geometries()
 
 @app.get("/api/counties")
-async def get_counties(
-    start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
-    end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
-    time_scale: Optional[str] = Query('period', description="Time scale: daily, monthly, seasonal, yearly, or period")
+async def get_counties_data(
+    start_date: str = Query(..., description="Start date in YYYY-MM-DD format"),
+    end_date: str = Query(..., description="End date in YYYY-MM-DD format"),
+    time_scale: str = Query("period", description="Time scale: daily, monthly, seasonal, yearly, period"),
+    db: Session = Depends(get_db)
 ):
-    """Get GeoJSON data for all counties with PM2.5 data"""
+    """
+    Get PM2.5 and population data for all counties within a date range.
+    Returns GeoJSON with properties for PM2.5 and population data.
+    """
     try:
-        print("Loading data...")
-        # Load and process the data
-        df = load_data(DAILY_DATA_CSV, COUNTIES_SHP)
-        print(f"Data loaded successfully. Processing {len(df)} counties")
+        # Parse dates
+        start = parse_flexible_date(start_date)
         
-        # If date range is specified, load and process daily data
-        if start_date and end_date:
-            try:
-                print(f"Loading daily data for range: {start_date} to {end_date}")
-                # Read the daily data CSV
-                daily_data = pd.read_csv(DAILY_DATA_CSV, on_bad_lines='skip')
-                
-                # Drop rows where all values are NA
-                daily_data = daily_data.dropna(how='all')
-                
-                # Convert date columns to datetime
-                try:
-                    if 'Year' in daily_data.columns and 'Month' in daily_data.columns and 'Day' in daily_data.columns:
-                        daily_data['date'] = pd.to_datetime(daily_data[['Year', 'Month', 'Day']], errors='coerce')
-                        daily_data = daily_data.dropna(subset=['date'])  # Drop rows with invalid dates
-                    else:
-                        print("Warning: Required date columns not found in daily data")
-                        daily_data = pd.DataFrame()  # Return empty DataFrame if columns are missing
-                except Exception as e:
-                    print(f"Error processing date columns: {str(e)}")
-                    daily_data = pd.DataFrame()
-                
-                # Handle different time scales
-                if time_scale == 'monthly':
-                    # For monthly data, we need to adjust the date range based on the month
-                    start_date = pd.to_datetime(start_date)
-                    month = start_date.month
-                    year = start_date.year
-                    
-                    # Set start to first day of month
-                    start_date = pd.Timestamp(year, month, 1)
-                    
-                    # Set end to last day of month (handling different month lengths)
-                    if month == 12:
-                        end_date = pd.Timestamp(year + 1, 1, 1) - pd.Timedelta(days=1)
-                    else:
-                        end_date = pd.Timestamp(year, month + 1, 1) - pd.Timedelta(days=1)
-                    
-                    print(f"Adjusted date range for month: {start_date} to {end_date}")
-                
-                elif time_scale == 'seasonal':
-                    # For seasonal data, we need to adjust the date range based on the season
-                    start_date = pd.to_datetime(start_date)
-                    season = start_date.month
-                    year = start_date.year
-                    
-                    # Define season ranges
-                    if season == 11:  # Winter (Dec-Feb)
-                        start_date = pd.Timestamp(year, 12, 1)
-                        end_date = pd.Timestamp(year + 1, 2, 28)
-                    elif season == 2:  # Spring (Mar-May)
-                        start_date = pd.Timestamp(year, 3, 1)
-                        end_date = pd.Timestamp(year, 5, 31)
-                    elif season == 5:  # Summer (Jun-Aug)
-                        start_date = pd.Timestamp(year, 6, 1)
-                        end_date = pd.Timestamp(year, 8, 31)
-                    else:  # Fall (Sep-Nov)
-                        start_date = pd.Timestamp(year, 9, 1)
-                        end_date = pd.Timestamp(year, 11, 30)
-                    
-                    print(f"Adjusted date range for season: {start_date} to {end_date}")
-                
-                # Filter by date range
-                mask = (daily_data['date'] >= start_date) & (daily_data['date'] <= end_date)
-                daily_data = daily_data[mask]
-                
-                # Ensure FIPS codes are strings and properly formatted
-                daily_data['FIPS'] = daily_data['FIPS'].astype(str).str.zfill(5)
-                df['GEOID'] = df['GEOID'].astype(str).str.zfill(5)
-                
-                # Ensure fire_pm25 exists, if not create it with 0s
-                if 'fire_pm25' not in daily_data.columns:
-                    daily_data['fire_pm25'] = 0
-                
-                print(f"Calculating averages for time scale: {time_scale}")
-                # Calculate averages based on time scale
-                if time_scale == 'daily':
-                    # For daily view, just use the single day's data
-                    daily_avg = daily_data.groupby('FIPS').agg({
-                        'Value': 'mean',
-                        'fire_pm25': 'mean'
-                    }).reset_index()
-                    # Calculate nonfire PM2.5 as total - fire
-                    daily_avg['nonfire_pm25'] = daily_avg['Value'] - daily_avg['fire_pm25']
-                    # Ensure non-negative values
-                    daily_avg['nonfire_pm25'] = daily_avg['nonfire_pm25'].clip(lower=0)
-                    print("Daily averages calculated")
-                    
-                elif time_scale == 'monthly':
-                    # For monthly view, group by FIPS and calculate monthly averages
-                    daily_avg = daily_data.groupby('FIPS').agg({
-                        'Value': 'mean',
-                        'fire_pm25': 'mean'
-                    }).reset_index()
-                    # Calculate nonfire PM2.5 as total - fire
-                    daily_avg['nonfire_pm25'] = daily_avg['Value'] - daily_avg['fire_pm25']
-                    # Ensure non-negative values
-                    daily_avg['nonfire_pm25'] = daily_avg['nonfire_pm25'].clip(lower=0)
-                    print("Monthly averages calculated")
-                    
-                elif time_scale == 'seasonal':
-                    # For seasonal view, group by FIPS and calculate seasonal averages
-                    daily_avg = daily_data.groupby('FIPS').agg({
-                        'Value': 'mean',
-                        'fire_pm25': 'mean'
-                    }).reset_index()
-                    # Calculate nonfire PM2.5 as total - fire
-                    daily_avg['nonfire_pm25'] = daily_avg['Value'] - daily_avg['fire_pm25']
-                    # Ensure non-negative values
-                    daily_avg['nonfire_pm25'] = daily_avg['nonfire_pm25'].clip(lower=0)
-                    print("Seasonal averages calculated")
-                    
-                elif time_scale == 'yearly':
-                    # For yearly view, group by FIPS and calculate yearly averages
-                    daily_avg = daily_data.groupby('FIPS').agg({
-                        'Value': 'mean',
-                        'fire_pm25': 'mean'
-                    }).reset_index()
-                    # Calculate nonfire PM2.5 as total - fire
-                    daily_avg['nonfire_pm25'] = daily_avg['Value'] - daily_avg['fire_pm25']
-                    # Ensure non-negative values
-                    daily_avg['nonfire_pm25'] = daily_avg['nonfire_pm25'].clip(lower=0)
-                    print("Yearly averages calculated")
-                    
-                else:  # period
-                    # For custom period, calculate averages for the entire period
-                    daily_avg = daily_data.groupby('FIPS').agg({
-                        'Value': 'mean',
-                        'fire_pm25': 'mean'
-                    }).reset_index()
-                    # Calculate nonfire PM2.5 as total - fire
-                    daily_avg['nonfire_pm25'] = daily_avg['Value'] - daily_avg['fire_pm25']
-                    # Ensure non-negative values
-                    daily_avg['nonfire_pm25'] = daily_avg['nonfire_pm25'].clip(lower=0)
-                    print("Period averages calculated")
-                
-                print("Merging with main dataframe...")
-                # First merge with original column names
-                df = df.merge(daily_avg, left_on='GEOID', right_on='FIPS', how='left')
-                
-                # Check for column name conflicts and handle them
-                value_col = 'Value_y' if 'Value_y' in df.columns else 'Value'
-                fire_col = 'fire_pm25_y' if 'fire_pm25_y' in df.columns else 'fire_pm25'
-                nonfire_col = 'nonfire_pm25_y' if 'nonfire_pm25_y' in df.columns else 'nonfire_pm25'
-                
-                # Drop any existing avg_total_pm25 columns to avoid duplicates
-                if 'avg_total_pm25' in df.columns:
-                    df = df.drop(columns=['avg_total_pm25'])
-                
-                # Now rename the columns after the merge
-                df = df.rename(columns={
-                    value_col: 'avg_total_pm25',
-                    fire_col: 'avg_fire_pm25',
-                    nonfire_col: 'avg_nonfire_pm25'
-                })
-                
-                # Update the PM2.5 values
-                df['avg_total_pm25'] = df['avg_total_pm25'].fillna(0)
-                df['fire_pm25'] = df['avg_fire_pm25'].fillna(0)
-                df['nonfire_pm25'] = df['avg_nonfire_pm25'].fillna(0)
-                
-                # Clean up temporary columns
-                columns_to_drop = ['FIPS']
-                # Add any duplicate columns to drop
-                for col in ['Value', 'Value_x', 'Value_y', 'fire_pm25', 'fire_pm25_x', 'fire_pm25_y', 
-                           'nonfire_pm25', 'nonfire_pm25_x', 'nonfire_pm25_y', 'avg_fire_pm25', 'avg_nonfire_pm25']:
-                    if col in df.columns and col not in ['avg_total_pm25', 'fire_pm25', 'nonfire_pm25']:
-                        columns_to_drop.append(col)
-                
-                df = df.drop(columns=columns_to_drop)
-                
-                # Convert to float before calculating min/max
-                df['avg_total_pm25'] = pd.to_numeric(df['avg_total_pm25'], errors='coerce')
-                df['fire_pm25'] = pd.to_numeric(df['fire_pm25'], errors='coerce')
-                df['nonfire_pm25'] = pd.to_numeric(df['nonfire_pm25'], errors='coerce')
-                
-                print("Data processing completed successfully")
-                
-            except Exception as e:
-                print(f"Error processing daily data: {str(e)}")
-                import traceback
-                print(f"Traceback: {traceback.format_exc()}")
-                # Continue with average data if daily data processing fails
-                pass
-        
-        print("Converting to GeoJSON...")
-        # Convert to GeoJSON
-        gdf = gpd.GeoDataFrame(df)
-        
-        # Handle NaN values in numeric columns
-        numeric_columns = gdf.select_dtypes(include=['float64', 'int64']).columns
-        for col in numeric_columns:
-            gdf[col] = gdf[col].fillna(0)
-        
-        # Convert to GeoJSON format
+        # Adjust end date based on input format
+        if len(end_date) == 4:  # Year only
+            end = datetime(start.year, 12, 31).date()
+        elif len(end_date) == 7:  # Year and month
+            end_month = datetime.strptime(end_date, "%Y-%m").date()
+            next_month = end_month.replace(day=28) + timedelta(days=4)  # Get to next month
+            end = (next_month - timedelta(days=next_month.day)).date()  # Last day of month
+        else:
+            end = parse_flexible_date(end_date)
+
+        # Base query with joins and filters
+        query = db.query(
+            County.fips,
+            County.name.label("county_name"),
+            func.avg(DailyPM25.total).label("avg_total_pm25"),
+            func.avg(DailyPM25.fire).label("fire_pm25"),
+            (func.avg(DailyPM25.total) - func.avg(DailyPM25.fire)).label("nonfire_pm25"),
+            County.geometry,
+            func.avg(Population.population).label("population")
+        ).join(
+            DailyPM25, DailyPM25.fips == County.fips
+        ).outerjoin(
+            Population, and_(
+                Population.fips == County.fips,
+                Population.year == extract('year', DailyPM25.date)
+            )
+        ).filter(
+            # Exclude Puerto Rico
+            ~County.fips.startswith('72'),
+            # Date range filter
+            DailyPM25.date.between(start, end)
+        )
+
+        # Group by based on time scale
+        if time_scale == "yearly":
+            query = query.group_by(
+                extract('year', DailyPM25.date),
+                County.fips,
+                County.name,
+                County.geometry
+            ).order_by(
+                extract('year', DailyPM25.date)
+            )
+        elif time_scale == "monthly":
+            query = query.group_by(
+                extract('year', DailyPM25.date),
+                extract('month', DailyPM25.date),
+                County.fips,
+                County.name,
+                County.geometry
+            ).order_by(
+                extract('year', DailyPM25.date),
+                extract('month', DailyPM25.date)
+            )
+        else:  # daily, seasonal, period
+            query = query.group_by(
+                DailyPM25.date,
+                County.fips,
+                County.name,
+                County.geometry
+            ).order_by(DailyPM25.date)
+
+        # Execute query
+        results = query.all()
+
+        # Process results into GeoJSON
         features = []
-        for feature, props in zip(
-            gdf.__geo_interface__["features"],
-            gdf.drop(columns="geometry").to_dict("records")
-        ):
-            try:
-                # Ensure all numeric values are valid
-                for key, value in props.items():
-                    if isinstance(value, float) and (pd.isna(value) or np.isinf(value)):
-                        props[key] = 0
-                
-                features.append({
-                    "type": "Feature",
-                    "geometry": feature["geometry"],
-                    "properties": props
-                })
-            except Exception as feat_err:
-                print(f"Error processing feature: {feat_err}")
+        for row in results:
+            # Skip rows without geometry
+            if not row.geometry:
                 continue
                 
-        print("GeoJSON conversion completed")
+            feature = {
+                "type": "Feature",
+                "geometry": row.geometry,
+                "properties": {
+                    "FIPS": row.fips,
+                    "county_name": row.county_name,
+                    "avg_total_pm25": float(row.avg_total_pm25) if row.avg_total_pm25 is not None else 0,
+                    "fire_pm25": float(row.fire_pm25) if row.fire_pm25 is not None else 0,
+                    "nonfire_pm25": float(row.nonfire_pm25) if row.nonfire_pm25 is not None else 0,
+                    "population": int(row.population) if row.population is not None else 0
+                }
+            }
+            features.append(feature)
+
         return {
             "type": "FeatureCollection",
             "features": features
         }
+
     except Exception as e:
-        print(f"Error in get_counties: {str(e)}")
-        import traceback
-        error_details = f"{str(e)}\n\n{traceback.format_exc()}"
-        print(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=error_details)
+        logger.error(f"Error in get_counties_data: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -584,6 +615,24 @@ async def read_root():
     """Serve the main HTML file"""
     return FileResponse("static/index.html")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    import logging
+    
+    # Configure Uvicorn logging
+    log_config = uvicorn.config.LOGGING_CONFIG
+    log_config["loggers"]["uvicorn.error"]["level"] = "WARNING"
+    log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"
+    log_config["loggers"]["uvicorn"]["level"] = "WARNING"
+    
+    # Disable watchfiles logging
+    logging.getLogger("watchfiles").setLevel(logging.WARNING)
+    
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="warning",
+        log_config=log_config
+    )
