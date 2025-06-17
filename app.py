@@ -335,11 +335,11 @@ async def trigger_preprocessing(
 
 @app.get("/api/counties/choropleth")
 async def get_choropleth_data(
-    time_scale: str = Query("yearly", regex="^(yearly|monthly|seasonal)$"),
+    time_scale: str = Query("yearly", pattern="^(yearly|monthly|seasonal)$"),
     year: Optional[int] = Query(None),
     month: Optional[int] = Query(None),
     season: Optional[str] = Query(None),
-    metric: str = Query("avg_total", regex="^(avg_total|avg_fire|avg_nonfire|max_total|max_fire)$"),
+    metric: str = Query("avg_total", pattern="^(avg_total|avg_fire|avg_nonfire|max_total|max_fire)$"),
     db: Session = Depends(get_db)
 ):
     """
@@ -487,10 +487,12 @@ async def get_choropleth_data(
 @app.get("/api/pm25/bar_chart/{fips}")
 async def get_bar_chart_data(
     fips: str,
-    time_scale: str = Query("yearly", regex="^(yearly|monthly|seasonal|daily)$"),
+    time_scale: str = Query("yearly", pattern="^(yearly|monthly|seasonal|daily)$"),
     start_year: Optional[int] = Query(None),
     end_year: Optional[int] = Query(None),
     year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None),
+    season: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -598,12 +600,65 @@ async def get_bar_chart_data(
             if not year:
                 raise HTTPException(status_code=400, detail="Year required for daily data")
             
-            start_date = date(year, 1, 1)
-            end_date = date(year, 12, 31)
+            # Helper function to get season from month
+            def get_season_from_month(month_num):
+                if month_num in [12, 1, 2]:
+                    return 'winter'
+                elif month_num in [3, 4, 5]:
+                    return 'spring'
+                elif month_num in [6, 7, 8]:
+                    return 'summer'
+                else:  # 9, 10, 11
+                    return 'fall'
+            
+            # Build the date range based on month or season
+            if month:
+                # Get daily data for specific month
+                if month < 1 or month > 12:
+                    raise HTTPException(status_code=400, detail="Month must be between 1 and 12")
+                
+                # Calculate last day of month
+                if month == 12:
+                    next_month = 1
+                    next_year = year + 1
+                else:
+                    next_month = month + 1
+                    next_year = year
+                
+                start_date = date(year, month, 1)
+                end_date = date(next_year, next_month, 1)  # First day of next month
+                
+            elif season:
+                # Get daily data for specific season
+                season = season.lower()
+                if season not in ['winter', 'spring', 'summer', 'fall']:
+                    raise HTTPException(status_code=400, detail="Season must be winter, spring, summer, or fall")
+                
+                if season == 'winter':
+                    # Winter: Dec 21 - Mar 20
+                    start_date = date(year - 1, 12, 21)
+                    end_date = date(year, 3, 21)
+                elif season == 'spring':
+                    # Spring: Mar 21 - Jun 20
+                    start_date = date(year, 3, 21)
+                    end_date = date(year, 6, 21)
+                elif season == 'summer':
+                    # Summer: Jun 21 - Sep 20
+                    start_date = date(year, 6, 21)
+                    end_date = date(year, 9, 21)
+                elif season == 'fall':
+                    # Fall: Sep 21 - Dec 20
+                    start_date = date(year, 9, 21)
+                    end_date = date(year, 12, 21)
+            else:
+                # Get all daily data for the year
+                start_date = date(year, 1, 1)
+                end_date = date(year + 1, 1, 1)  # First day of next year
             
             results = db.query(DailyPM25).filter(
                 DailyPM25.fips == fips,
-                DailyPM25.date.between(start_date, end_date)
+                DailyPM25.date >= start_date,
+                DailyPM25.date < end_date
             ).order_by(DailyPM25.date).all()
             
             data = [
@@ -627,7 +682,7 @@ async def get_bar_chart_data(
 
 @app.get("/api/counties/statistics")
 async def get_county_statistics(
-    time_scale: str = Query("yearly", regex="^(yearly|monthly|seasonal)$"),
+    time_scale: str = Query("yearly", pattern="^(yearly|monthly|seasonal)$"),
     year: Optional[int] = Query(None),
     month: Optional[int] = Query(None),
     season: Optional[str] = Query(None),
