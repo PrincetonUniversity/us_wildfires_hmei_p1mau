@@ -3,9 +3,6 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { createRoot } from 'react-dom/client';
 import CountyBarChart from './CountyBarChart';
-import DateRangeSelector from './DateRangeSelector';
-import { format } from 'date-fns';
-import { Typography } from '@mui/material';
 
 // Color scale for PM2.5 values (yellow to orange to red)
 const PM25_COLORS_TOTAL = [
@@ -52,105 +49,232 @@ const getStateFromFIPS = (fips) => {
   return STATE_FIPS_TO_ABBR[stateFIPS] || '';
 };
 
+// Helper function to get season from month
+const getSeasonFromMonth = (month) => {
+  if (month >= 2 && month <= 4) return 'spring';
+  if (month >= 5 && month <= 7) return 'summer';
+  if (month >= 8 && month <= 10) return 'fall';
+  return 'winter';
+};
+
+// Helper function to calculate dynamic color scale based on data
+const calculateDynamicColorScale = (data, metric) => {
+  if (!data || !data.features || data.features.length === 0) {
+    return //getColorScale(); // fallback to static scale
+  }
+
+  // Extract all values for the current metric
+  const values = data.features
+    .map(feature => feature.properties.value || 0)
+    .filter(val => val > 0) // Remove zero values
+    .sort((a, b) => a - b);
+
+  if (values.length === 0) {
+    return //getColorScale(); // fallback to static scale
+  }
+
+  const min = values[0];
+  const max = values[values.length - 1];
+  
+  // Create 6 evenly distributed breakpoints
+  const range = max - min;
+  const step = range / 5;
+  
+  // Base colors (same as your existing scales)
+  const colors = ['#fff7bc', '#fee391', '#fec44f', '#fe9929', '#ec7014', '#cc4c02'];
+  
+  return colors.map((color, i) => [min + (step * i), color]);
+};
+
 const Map = ({ mapboxToken, stateAbbr }) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeLayer, setActiveLayer] = useState('avg_total_pm25');
-  const [activePm25Type, setActivePm25Type] = useState('total'); // 'total', 'fire', or 'nonfire'
-  const [startDate, setStartDate] = useState(new Date('2021-01-01'));
-  const [endDate, setEndDate] = useState(new Date('2023-12-31'));
-  const [timeScale, setTimeScale] = useState('period');
+  const [activeMetric, setActiveMetric] = useState('avg_total'); // 'avg_total', 'avg_fire', 'avg_nonfire', 'max_total', 'max_fire'
+  const [timeScale, setTimeScale] = useState('yearly');
+  const [year, setYear] = useState(2023);
+  const [month, setMonth] = useState(1); // 1-12
+  const [season, setSeason] = useState('winter');
   const [pendingUpdate, setPendingUpdate] = useState(false);
+  const [choroplethData, setChoroplethData] = useState(null);
   const currentCountyRef = useRef(null);
+  
+  // Function to update the legend based on the current metric and data
+  const updateLegend = () => {
+    if (!map.current) return;
+    
+    const legend = document.getElementById('legend');
+    if (!legend) return;
+    
+    const colorScale = getColorScale(choroplethData);
+    const metricLabel = getMetricLabel(activeMetric);
+    
+    // Clear existing legend
+    legend.innerHTML = '';
+    
+    // Add title
+    const title = document.createElement('div');
+    title.textContent = metricLabel;
+    title.style.marginBottom = '5px';
+    title.style.fontWeight = 'bold';
+    legend.appendChild(title);
+    
+    // Add color gradient
+    const gradient = document.createElement('div');
+    gradient.style.display = 'flex';
+    gradient.style.marginBottom = '5px';
+    gradient.style.height = '10px';
+    gradient.style.width = '100%';
+    gradient.style.background = `linear-gradient(to right, ${colorScale.map(([_, color]) => color).join(', ')})`;
+    legend.appendChild(gradient);
+    
+    // Add labels
+    const labels = document.createElement('div');
+    labels.style.display = 'flex';
+    labels.style.justifyContent = 'space-between';
+    labels.style.fontSize = '0.8em';
+    
+    // Add min and max values
+    const minLabel = document.createElement('span');
+    minLabel.textContent = colorScale[0][0].toFixed(1);
+    
+    const maxLabel = document.createElement('span');
+    maxLabel.textContent = `${colorScale[colorScale.length - 1][0].toFixed(1)}+`;
+    
+    labels.appendChild(minLabel);
+    labels.appendChild(maxLabel);
+    legend.appendChild(labels);
+  };
 
-  // Function to fetch data with date range and time scale
-  const fetchData = async (start, end, scale) => {
+  // Function to fetch choropleth data with new API
+  const fetchChoroplethData = async () => {
     try {
-      let startStr, endStr;
+      setLoading(true);
+      const params = new URLSearchParams({
+        time_scale: timeScale,
+        metric: activeMetric,
+        ...(year && { year: year.toString() }),
+        ...(timeScale === 'monthly' && month && { month: month.toString() }),
+        ...(timeScale === 'seasonal' && season && { season }),
+      });
 
-      // Format dates based on time scale
-      switch (scale) {
-        case 'yearly':
-          startStr = format(start, 'yyyy');
-          endStr = startStr; // Same year for yearly view
-          break;
-        case 'monthly':
-          // Get the month's start and end dates
-          const month = start.getMonth();
-          const year = start.getFullYear();
-          const monthStart = new Date(year, month, 1);
-          const monthEnd = new Date(year, month + 1, 0); // Last day of the month
-          startStr = format(monthStart, 'yyyy-MM-dd');
-          endStr = format(monthEnd, 'yyyy-MM-dd');
-          break;
-        case 'seasonal':
-          // Get the season's start and end dates
-          const season = start.getMonth();
-          const seasonYear = start.getFullYear();
-          let seasonStart, seasonEnd;
-
-          if (season === 11) { // Winter
-            seasonStart = new Date(seasonYear, 11, 1); // December 1
-            seasonEnd = new Date(seasonYear + 1, 2, 28); // February 28/29
-          } else if (season === 2) { // Spring
-            seasonStart = new Date(seasonYear, 2, 1); // March 1
-            seasonEnd = new Date(seasonYear, 5, 30); // May 31
-          } else if (season === 5) { // Summer
-            seasonStart = new Date(seasonYear, 5, 1); // June 1
-            seasonEnd = new Date(seasonYear, 8, 30); // August 31
-          } else { // Fall
-            seasonStart = new Date(seasonYear, 8, 1); // September 1
-            seasonEnd = new Date(seasonYear, 11, 30); // November 30
-          }
-
-          startStr = format(seasonStart, 'yyyy-MM-dd');
-          endStr = format(seasonEnd, 'yyyy-MM-dd');
-          break;
-        case 'daily':
-          startStr = format(start, 'yyyy-MM-dd');
-          endStr = startStr; // Same day for daily view
-          break;
-        case 'period':
-        default:
-          startStr = format(start, 'yyyy-MM-dd');
-          endStr = format(end, 'yyyy-MM-dd');
+      console.log('Fetching choropleth data with params:', params.toString());
+      const response = await fetch(`http://localhost:8000/api/counties/choropleth?${params}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to fetch choropleth data: ${response.status} ${response.statusText}\n${errorText}`);
       }
-
-      const response = await fetch(
-        `http://localhost:8000/api/counties?start_date=${startStr}&end_date=${endStr}&time_scale=${scale}`
-      );
-      if (!response.ok) throw new Error('Failed to fetch PM2.5 data');
-      return await response.json();
+      const data = await response.json();
+      
+      // Log the first feature to verify the data
+      if (data.features && data.features.length > 0) {
+        console.log('First feature properties:', data.features[0].properties);
+      }
+      
+      setChoroplethData(data);
+      return data;
     } catch (err) {
-      console.error('Error fetching data:', err);
+      console.error('Error fetching choropleth data:', err);
+      setError(err.message);
       throw err;
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Handle date changes
-  const handleDateChange = (type, newDate) => {
-    if (type === 'start') {
-      setStartDate(newDate);
-      // For yearly and daily views, update end date to match
-      if (timeScale === 'yearly' || timeScale === 'daily') {
-        setEndDate(newDate);
+  // Function to fetch bar chart data for a specific county
+  const fetchBarChartData = async (fips) => {
+    try {
+      const params = new URLSearchParams({
+        time_scale: 'yearly',
+        start_year: '2013',
+        end_year: '2023'
+      });
+
+      const response = await fetch(`http://localhost:8000/api/pm25/bar_chart/${fips}?${params}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        throw new Error(`Failed to fetch bar chart data: ${response.status} ${response.statusText}`);
       }
-    } else {
-      setEndDate(newDate);
+      
+      const data = await response.json();
+      
+      // Ensure data is an array
+      if (!Array.isArray(data)) {
+        console.error('Expected array but got:', data);
+        return [];
+      }
+      
+      // Transform the data to match what the chart expects
+      return data.map(item => ({
+        year: item.year,
+        timePeriod: item.year.toString(),
+        label: item.year.toString(),
+        fire: item.fire || 0,
+        nonFire: item.nonfire || 0,
+        total: item.total || 0
+      }));
+    } catch (err) {
+      console.error('Error in fetchBarChartData:', err);
+      // Return empty array instead of throwing to prevent breaking the UI
+      return [];
     }
-    setPendingUpdate(true);
   };
 
   // Handle time scale changes
   const handleTimeScaleChange = (newScale) => {
     setTimeScale(newScale);
-    // Reset dates based on new time scale
-    if (newScale === 'yearly' || newScale === 'daily') {
-      setEndDate(startDate);
-    }
     setPendingUpdate(true);
+  };
+
+  // Handle year changes
+  const handleYearChange = (newYear) => {
+    setYear(newYear);
+    setPendingUpdate(true);
+  };
+
+  // Handle month changes
+  const handleMonthChange = (newMonth) => {
+    setMonth(newMonth);
+    setPendingUpdate(true);
+  };
+
+  // Handle season changes
+  const handleSeasonChange = (newSeason) => {
+    setSeason(newSeason);
+    setPendingUpdate(true);
+  };
+
+  // Handle metric changes
+  const handleMetricChange = async (newMetric) => {
+    // Automatically fetch new data when metric changes
+    if (map.current && map.current.isStyleLoaded()) {
+      try {
+        // DON'T set loading to true - keep it smooth
+        const params = new URLSearchParams({
+          time_scale: timeScale,
+          metric: newMetric,
+          ...(year && { year: year.toString() }),
+          ...(timeScale === 'monthly' && month && { month: month.toString() }),
+          ...(timeScale === 'seasonal' && season && { season }),
+        });
+
+        console.log('Fetching choropleth data with params:', params.toString());
+        const response = await fetch(`http://localhost:8000/api/counties/choropleth?${params}`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to fetch choropleth data: ${response.status} ${response.statusText}\n${errorText}`);
+        }
+        const data = await response.json();
+        setChoroplethData(data);
+        setActiveMetric(newMetric);
+      } catch (err) {
+        console.error('Error updating map data:', err);
+        setError('Failed to update map data: ' + err.message);
+      }
+    }
   };
 
   // Handle submit button click
@@ -159,16 +283,13 @@ const Map = ({ mapboxToken, stateAbbr }) => {
 
     try {
       setLoading(true);
-      const data = await fetchData(startDate, endDate, timeScale);
-
-      if (map.current.getSource('pm25')) {
-        map.current.getSource('pm25').setData(data);
-      }
+      // Fetch new data with current parameters
+      const response = await fetchChoroplethData();
+      // The fetchChoroplethData function will update choroplethData state
       setPendingUpdate(false);
     } catch (err) {
       console.error('Error updating map data:', err);
-    } finally {
-      setLoading(false);
+      setError('Failed to update map data: ' + err.message);
     }
   };
 
@@ -212,49 +333,15 @@ const Map = ({ mapboxToken, stateAbbr }) => {
     // Load initial data when map is ready
     map.current.on('load', async () => {
       try {
-        const data = await fetchData(startDate, endDate, timeScale);
-
-        // Filter out Puerto Rico counties and calculate nonfire_pm25 if needed
-        const filteredData = {
-          ...data,
-          features: data.features.map(feature => {
-            const fips = feature.properties.GEOID || feature.properties.FIPS;
-            // Skip Puerto Rico counties
-            if (fips?.toString().startsWith('72')) return null;
-            
-            // Calculate nonfire_pm25 if not present
-            const props = { ...feature.properties };
-            if (props.avg_total_pm25 !== undefined && props.fire_pm25 !== undefined) {
-              props.nonfire_pm25 = Math.max(0, props.avg_total_pm25 - (props.fire_pm25 || 0));
-            }
-            
-            return {
-              ...feature,
-              properties: props
-            };
-          }).filter(Boolean) // Remove null entries (Puerto Rico)
-        };
+        const data = await fetchChoroplethData();
 
         // Add source and layer
         if (map.current) {
           map.current.addSource('pm25', {
             type: 'geojson',
-            data: filteredData,
+            data: data,
             generateId: true
           });
-
-          // Helper function to get the appropriate color scale based on PM2.5 type
-          const getColorScale = (type) => {
-            switch(type) {
-              case 'fire':
-                return PM25_COLORS_FIRE;
-              case 'nonfire':
-                return PM25_COLORS_TOTAL; // Same as total for consistency
-              case 'total':
-              default:
-                return PM25_COLORS_TOTAL;
-            }
-          };
 
           // Add the fill layer for PM2.5
           map.current.addLayer({
@@ -265,12 +352,8 @@ const Map = ({ mapboxToken, stateAbbr }) => {
               'fill-color': [
                 'interpolate',
                 ['linear'],
-                ['get', activeLayer === 'avg_population' ? 'avg_population' : 
-                  activePm25Type === 'fire' ? 'fire_pm25' : 
-                  activePm25Type === 'nonfire' ? 'nonfire_pm25' : 'avg_total_pm25'],
-                ...(activeLayer === 'avg_population' ? POPULATION_COLORS : 
-                   activePm25Type === 'fire' ? PM25_COLORS_FIRE : PM25_COLORS_TOTAL)
-                  .reduce((acc, [value, color]) => acc.concat(value, color), [])
+                ['get', 'value'], // The new API uses 'value' field
+                ...getColorScale(choroplethData).reduce((acc, [value, color]) => acc.concat(value, color), [])
               ],
               'fill-opacity': 0.8,
               'fill-outline-color': 'rgba(0,0,0,0.2)'
@@ -278,111 +361,100 @@ const Map = ({ mapboxToken, stateAbbr }) => {
           });
 
           // Add hover effect
-          map.current.on('mousemove', 'pm25-layer', (e) => {
+          map.current.on('mousemove', 'pm25-layer', async (e) => {
             if (e.features.length > 0) {
               const feature = e.features[0];
               const props = feature.properties;
-              const countyId = props.GEOID || props.FIPS;
+              const countyId = props.GEOID || props.FIPS || props.fips;
 
               // Only update if we're hovering over a different county
               if (currentCountyRef.current !== countyId) {
                 currentCountyRef.current = countyId;
 
-                // Debug: Log all available properties
-                console.log('Available properties:', Object.keys(props).sort());
-                
-                // Prepare chart data for 2013–2023
-                const chartData = [];
-                console.log('All properties for this county:', props);
-                
-                // Log all PM2.5 related properties
-                const pm25Props = Object.keys(props).filter(key => key.startsWith('pm25_'));
-                console.log('All PM2.5 properties:', pm25Props);
-                
-                for (let year = 2013; year <= 2023; year++) {
-                  // Get all possible property names for this year
-                  const totalKey = `pm25_${year}_total`;
-                  const fireKey = `pm25_${year}_fire`;
-                  const nonfireKey = `pm25_${year}_nonfire`;
-                  
-                  // Log raw values before any processing
-                  console.log(`\nYear ${year} raw values:`, {
-                    [totalKey]: props[totalKey],
-                    [fireKey]: props[fireKey],
-                    [nonfireKey]: props[nonfireKey]
-                  });
-                  
-                  // Get values with debug logging
-                  const total = Number(props[totalKey] || 0);
-                  const fire = Number(props[fireKey] || 0);
-                  const nonfire = Number(props[nonfireKey] || (total - fire));
-                  
-                  // Ensure values are valid and non-negative
-                  const validFire = Math.max(0, fire);
-                  const validNonFire = Math.max(0, nonfire);
-                  
-                  // Debug log the values
-                  console.log(`Year ${year} processed values:`, { 
-                    total, 
-                    fire, 
-                    nonfire,
-                    validFire,
-                    validNonFire,
-                    totalExists: totalKey in props,
-                    fireExists: fireKey in props,
-                    nonfireExists: nonfireKey in props
-                  });
+                try {
+                  // Fetch bar chart data for this county
+                  const barChartData = await fetchBarChartData(countyId);
 
-                  chartData.push({
-                    year,
-                    fire: validFire,
-                    nonFire: validNonFire
-                  });
-                }
-                
-                console.log('Final chart data:', chartData);
+                  // Create a DOM node for React rendering
+                  const popupNode = document.createElement('div');
 
-                // Create a DOM node for React rendering
-                const popupNode = document.createElement('div');
+                  // Add county name above chart
+                  const nameDiv = document.createElement('div');
+                  nameDiv.style.fontWeight = 'bold';
+                  nameDiv.style.fontSize = '1.1em';
+                  nameDiv.style.marginBottom = '8px';
+                  const stateAbbr = getStateFromFIPS(countyId);
+                  nameDiv.textContent = `${props.county_name || props.NAME || 'Unknown County'}, ${stateAbbr}`;
+                  popupNode.appendChild(nameDiv);
 
-                // Add county name above chart
-                const nameDiv = document.createElement('div');
-                nameDiv.style.fontWeight = 'bold';
-                nameDiv.style.fontSize = '1.1em';
-                nameDiv.style.marginBottom = '8px';
-                const stateAbbr = getStateFromFIPS(countyId);
-                nameDiv.textContent = `${props.county_name || props.NAME || 'Unknown County'}, ${stateAbbr}`;
-                popupNode.appendChild(nameDiv);
+                  // Add current PM2.5 value and other metrics
+                  const valuesDiv = document.createElement('div');
+                  valuesDiv.style.marginBottom = '8px';
+                  valuesDiv.style.fontSize = '0.9em';
+                  
+                  // Format the current value based on the active metric
+                  const currentValue = props.value || 0;
+                  const formattedValue = currentValue.toFixed(2);
 
-                // Add PM2.5 values
-                const valuesDiv = document.createElement('div');
-                valuesDiv.style.marginBottom = '8px';
-                valuesDiv.style.fontSize = '0.9em';
-                const totalPm25 = props.avg_total_pm25 || 0;
-                const firePm25 = props.fire_pm25 || 0;
-                const nonfirePm25 = props.nonfire_pm25 || Math.max(0, totalPm25 - firePm25);
-                
+                // Create a more informative display
                 valuesDiv.innerHTML = `
-                  <div>Population: ${props.avg_population?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || 'N/A'}</div>
-                  <div>Total PM2.5: ${totalPm25.toFixed(2)} µg/m³</div>
-                  <div>Fire PM2.5: ${firePm25.toFixed(2)} µg/m³ (${(firePm25 / (totalPm25 || 1) * 100).toFixed(1)}%)</div>
-                  <div>Non-fire PM2.5: ${nonfirePm25.toFixed(2)} µg/m³ (${(nonfirePm25 / (totalPm25 || 1) * 100).toFixed(1)}%)</div>
+                  <div style="margin-bottom: 5px;">
+                    <strong>Current Value:</strong> ${formattedValue} µg/m³
+                  </div>
+                  <div style="display: flex; margin-bottom: 3px;">
+                    <span>Total PM2.5:</span> 
+                    <span style="margin-left: 8px;">${(props.avg_total || 0).toFixed(2)} µg/m³</span>
+                  </div>
+                  <div style="display: flex; margin-bottom: 3px;">
+                    <span>Fire PM2.5:</span> 
+                    <span style="margin-left: 8px;">${(props.avg_fire || 0).toFixed(2)} µg/m³</span>
+                  </div>
+                  <div style="display: flex; margin-bottom: 3px;">
+                    <span>Non-fire PM2.5:</span> 
+                    <span style="margin-left: 8px;">${(props.avg_nonfire || 0).toFixed(2)} µg/m³</span>
+                  </div>
+                  ${props.population ? `
+                  <div style="margin-top: 8px; padding-top: 5px; border-top: 1px solid #eee;">
+                    <strong>Population:</strong> ${props.population.toLocaleString()}
+                  </div>` : ''}
                 `;
-                popupNode.appendChild(valuesDiv);
+                  popupNode.appendChild(valuesDiv);
 
-                // Render chart
-                const chartDiv = document.createElement('div');
-                chartDiv.style.width = '350px';
-                chartDiv.style.height = '180px';
-                popupNode.appendChild(chartDiv);
-                const root = createRoot(chartDiv);
-                root.render(<CountyBarChart data={chartData} />);
+                  // Render chart if data is available
+                  if (barChartData && barChartData.length > 0) {
+                    const chartDiv = document.createElement('div');
+                    chartDiv.style.width = '350px';
+                    chartDiv.style.height = '180px';
+                    popupNode.appendChild(chartDiv);
+                    const root = createRoot(chartDiv);
+                    root.render(<CountyBarChart data={barChartData} />);
+                  }
 
-                map.current.getCanvas().style.cursor = 'pointer';
-                popup
-                  .setLngLat(e.lngLat)
-                  .setDOMContent(popupNode)
-                  .addTo(map.current);
+                  map.current.getCanvas().style.cursor = 'pointer';
+                  popup
+                    .setLngLat(e.lngLat)
+                    .setDOMContent(popupNode)
+                    .addTo(map.current);
+                } catch (err) {
+                  console.error('Error fetching bar chart data:', err);
+                  // Still show basic popup without chart
+                  const popupNode = document.createElement('div');
+                  const nameDiv = document.createElement('div');
+                  nameDiv.style.fontWeight = 'bold';
+                  nameDiv.style.fontSize = '1.1em';
+                  const stateAbbr = getStateFromFIPS(countyId);
+                  nameDiv.textContent = `${props.county_name || props.NAME || 'Unknown County'}, ${stateAbbr}`;
+                  popupNode.appendChild(nameDiv);
+
+                  const valueDiv = document.createElement('div');
+                  valueDiv.textContent = `${getMetricLabel()}: ${(props.value || 0).toFixed(2)} µg/m³`;
+                  popupNode.appendChild(valueDiv);
+
+                  popup
+                    .setLngLat(e.lngLat)
+                    .setDOMContent(popupNode)
+                    .addTo(map.current);
+                }
               } else {
                 // Just update the popup position for the same county
                 popup.setLngLat(e.lngLat);
@@ -394,16 +466,13 @@ const Map = ({ mapboxToken, stateAbbr }) => {
           map.current.on('mouseleave', 'pm25-layer', () => {
             map.current.getCanvas().style.cursor = '';
             popup.remove();
-            currentCountyRef.current = null;  // Reset current county
+            currentCountyRef.current = null;
           });
 
-          // Set loading to false when data is loaded
           setLoading(false);
         }
       } catch (err) {
-        console.error('Error loading PM2.5 data:', err);
-        setError('Failed to load PM2.5 data');
-      } finally {
+        console.error('Error loading PM2.5 data:', err);        setError('Failed to load PM2.5 data');
         setLoading(false);
       }
     });
@@ -411,73 +480,95 @@ const Map = ({ mapboxToken, stateAbbr }) => {
     // Cleanup
     return () => {
       if (map.current) {
-        // Remove event listeners
         if (map.current.loaded()) {
           map.current.off('mousemove', 'pm25-layer');
           map.current.off('mouseleave', 'pm25-layer');
         }
-        // Remove popup
         if (popup.isOpen()) {
           popup.remove();
         }
-        // Remove map
         map.current.remove();
         map.current = null;
       }
     };
   }, [mapboxToken, stateAbbr]);
 
-  // Update layer when activeLayer or activePm25Type changes
-  useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded() || !map.current.getLayer('pm25-layer')) {
-      return;
+  // Helper function to get color scale based on metric
+  const getColorScale = (data = null) => {
+    // If we have data, calculate dynamic scale
+    if (data) {
+      return calculateDynamicColorScale(data, activeMetric);
     }
-
-    // Determine the field name based on the selected layer type
-    let fieldName;
-    let colors;
     
-    if (activeLayer === 'avg_population') {
-      fieldName = 'avg_population';
-      colors = POPULATION_COLORS;
-    } else {
-      // For PM2.5 layers, determine which field to use based on activePm25Type
-      fieldName = activePm25Type === 'fire' ? 'fire_pm25' : 
-                activePm25Type === 'nonfire' ? 'nonfire_pm25' : 'avg_total_pm25';
-      colors = activePm25Type === 'fire' ? PM25_COLORS_FIRE : PM25_COLORS_TOTAL;
+    // Fallback to static scales
+    if (activeMetric.includes('fire') && !activeMetric.includes('nonfire')) {
+      return PM25_COLORS_FIRE;
     }
+    return PM25_COLORS_TOTAL;
+  };
+  
+  // Helper function to get metric label
+  const getMetricLabel = (metric = activeMetric) => {
+    const labels = {
+      'avg_total': 'Average Total PM2.5',
+      'avg_fire': 'Average Fire PM2.5',
+      'avg_nonfire': 'Average Non-fire PM2.5',
+      'max_total': 'Maximum Total PM2.5',
+      'max_fire': 'Maximum Fire PM2.5'
+    };
+    return labels[metric] || 'PM2.5';
+  };
 
-    // Create the paint stops for the color scale
-    const paintStops = colors.reduce((acc, [value, color]) => acc.concat(value, color), []);
+  // Update map layers when choroplethData or activeMetric changes
+  useEffect(() => {
+    if (!map.current || !choroplethData) return;
 
-    // Update the map layer
-    map.current.setPaintProperty('pm25-layer', 'fill-color', [
-      'interpolate',
-      ['linear'],
-      ['get', fieldName],
-      ...paintStops
-    ]);
-
-    // Update the legend title
-    const legendEl = document.getElementById('pm25-legend');
-    if (legendEl) {
-      const titleEl = legendEl.querySelector('div:first-child');
-      if (titleEl) {
-        let title = '';
-        if (activeLayer === 'avg_population') {
-          title = 'Population';
-        } else {
-          const typeMap = {
-            'total': 'Total PM2.5',
-            'fire': 'Fire PM2.5',
-            'nonfire': 'Non-fire PM2.5'
-          };
-          title = `${typeMap[activePm25Type]} (μg/m³)`;
-        }
-        titleEl.textContent = title;
+    const mapInstance = map.current;
+    
+    // If layer doesn't exist, create it
+    if (!mapInstance.getLayer('pm25-layer')) {
+      // Add the source if it doesn't exist
+      if (!mapInstance.getSource('pm25')) {
+        mapInstance.addSource('pm25', {
+          type: 'geojson',
+          data: choroplethData,
+          generateId: true
+        });
       }
+
+      // Add the layer
+      mapInstance.addLayer({
+        id: 'pm25-layer',
+        type: 'fill',
+        source: 'pm25',
+        paint: {
+          'fill-color': [
+            'interpolate',
+            ['linear'],
+            ['get', 'value'],
+            ...getColorScale(choroplethData).reduce((acc, [value, color]) => acc.concat(value, color), [])
+          ],
+          'fill-opacity': 0.8,
+          'fill-outline-color': 'rgba(0,0,0,0.2)'
+        }
+      }, 'waterway-label');
+    } else {
+      // Layer exists, just update the data and paint properties
+      mapInstance.getSource('pm25').setData(choroplethData);
+      
+      // Update the fill color based on new metric
+      mapInstance.setPaintProperty('pm25-layer', 'fill-color', [
+        'interpolate',
+        ['linear'],
+        ['get', 'value'],
+        ...getColorScale(choroplethData).reduce((acc, [value, color]) => acc.concat(value, color), [])
+      ]);
     }
-  }, [activeLayer, activePm25Type]);
+    
+    // Update the legend
+    updateLegend();
+    
+  }, [choroplethData, activeMetric]);
 
   if (error) {
     return (
@@ -517,178 +608,189 @@ const Map = ({ mapboxToken, stateAbbr }) => {
           height: '100%'
         }}
       />
+      
+      {/* Legend */}
+      <div id="legend" style={{
+        position: 'absolute',
+        bottom: '30px',
+        right: '20px',
+        backgroundColor: 'white',
+        padding: '10px',
+        borderRadius: '4px',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+        zIndex: 1,
+        width: '200px'
+      }} />
 
-      {/* Date Range Selector */}
+      {/* Time Controls */}
       <div style={{
         position: 'absolute',
         top: '20px',
         left: '20px',
         backgroundColor: 'white',
-        padding: '10px',
+        padding: '15px',
         borderRadius: '4px',
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-        zIndex: 1
+        zIndex: 1,
+        minWidth: '250px'
       }}>
-        <DateRangeSelector
-          startDate={startDate}
-          endDate={endDate}
-          onDateChange={handleDateChange}
-          onSubmit={handleSubmit}
-          timeScale={timeScale}
-          onTimeScaleChange={handleTimeScaleChange}
-        />
+        <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>Time Controls</div>
+        
+        {/* Time Scale Selection */}
+        <div style={{ marginBottom: '10px' }}>
+          <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500' }}>Time Scale:</label>
+          <select 
+            value={timeScale} 
+            onChange={(e) => handleTimeScaleChange(e.target.value)}
+            style={{ width: '100%', padding: '5px' }}
+          >
+            <option value="yearly">Yearly</option>
+            <option value="monthly">Monthly</option>
+            <option value="seasonal">Seasonal</option>
+          </select>
+        </div>
+
+        {/* Year Selection */}
+        <div style={{ marginBottom: '10px' }}>
+          <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500' }}>Year:</label>
+          <select 
+            value={year} 
+            onChange={(e) => handleYearChange(parseInt(e.target.value))}
+            style={{ width: '100%', padding: '5px' }}
+          >
+            {Array.from({length: 11}, (_, i) => 2013 + i).map(y => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Month Selection (only for monthly time scale) */}
+        {timeScale === 'monthly' && (
+          <div style={{ marginBottom: '10px' }}>
+            <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500' }}>Month:</label>
+            <select 
+              value={month} 
+              onChange={(e) => handleMonthChange(parseInt(e.target.value))}
+              style={{ width: '100%', padding: '5px' }}
+            >
+              {['January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December']
+                .map((name, i) => (
+                  <option key={i + 1} value={i + 1}>{name}</option>
+                ))}
+            </select>
+          </div>
+        )}
+
+        {/* Season Selection (only for seasonal time scale) */}
+        {timeScale === 'seasonal' && (
+          <div style={{ marginBottom: '10px' }}>
+            <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500' }}>Season:</label>
+            <select 
+              value={season} 
+              onChange={(e) => handleSeasonChange(e.target.value)}
+              style={{ width: '100%', padding: '5px' }}
+            >
+              <option value="winter">Winter</option>
+              <option value="spring">Spring</option>
+              <option value="summer">Summer</option>
+              <option value="fall">Fall</option>
+            </select>
+          </div>
+        )}
+
+        <button 
+          onClick={handleSubmit}
+          style={{
+            width: '100%',
+            padding: '8px',
+            backgroundColor: '#1976d2',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: 'bold'
+          }}
+          disabled={loading}
+        >
+          {loading ? 'Loading...' : 'Update Map'}
+        </button>
+
         {pendingUpdate && (
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+          <div style={{ 
+            marginTop: '8px', 
+            fontSize: '0.8em', 
+            color: '#666',
+            fontStyle: 'italic'
+          }}>
             Changes pending. Click "Update Map" to apply.
-          </Typography>
+          </div>
         )}
       </div>
 
-      {/* Layer Toggle */}
+      {/* Metric Selection */}
       <div style={{
         position: 'absolute',
         top: '20px',
         right: '20px',
         backgroundColor: 'white',
-        padding: '10px',
+        padding: '15px',
         borderRadius: '4px',
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
         zIndex: 1,
-        width: '200px'
+        minWidth: '200px'
       }}>
-        <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Map Layer</div>
+        <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>PM2.5 Metric</div>
         
-        {/* Data Type Selection */}
-        <div style={{ marginBottom: '10px' }}>
-          <div style={{ marginBottom: '5px', fontWeight: '500' }}>Data Type:</div>
-          <label style={{ display: 'block', marginBottom: '5px' }}>
+        {['avg_total', 'avg_fire', 'avg_nonfire', 'max_total', 'max_fire'].map(metric => (
+          <label key={metric} style={{ display: 'block', marginBottom: '8px' }}>
             <input
               type="radio"
-              name="dataType"
-              checked={activeLayer === 'avg_total_pm25'}
-              onChange={() => setActiveLayer('avg_total_pm25')}
-              style={{ marginRight: '5px' }}
+              name="metric"
+              checked={activeMetric === metric}
+              onChange={() => handleMetricChange(metric)}
+              style={{ marginRight: '8px' }}
             />
-            PM2.5
+            {getMetricLabel(metric)}
           </label>
-          <label style={{ display: 'block', marginBottom: '5px' }}>
-            <input
-              type="radio"
-              name="dataType"
-              checked={activeLayer === 'avg_population'}
-              onChange={() => setActiveLayer('avg_population')}
-              style={{ marginRight: '5px' }}
-            />
-            Population
-          </label>
-        </div>
-
-        {/* PM2.5 Type Selection (only shown when PM2.5 is selected) */}
-        {activeLayer !== 'avg_population' && (
-          <div style={{ marginTop: '10px', borderTop: '1px solid #eee', paddingTop: '10px' }}>
-            <div style={{ marginBottom: '5px', fontWeight: '500' }}>PM2.5 Type:</div>
-            <label style={{ display: 'block', marginBottom: '5px' }}>
-              <input
-                type="radio"
-                name="pm25Type"
-                checked={activePm25Type === 'total'}
-                onChange={() => setActivePm25Type('total')}
-                style={{ marginRight: '5px' }}
-              />
-              Total
-            </label>
-            <label style={{ display: 'block', marginBottom: '5px' }}>
-              <input
-                type="radio"
-                name="pm25Type"
-                checked={activePm25Type === 'fire'}
-                onChange={() => setActivePm25Type('fire')}
-                style={{ marginRight: '5px' }}
-              />
-              Fire
-            </label>
-            <label style={{ display: 'block' }}>
-              <input
-                type="radio"
-                name="pm25Type"
-                checked={activePm25Type === 'nonfire'}
-                onChange={() => setActivePm25Type('nonfire')}
-                style={{ marginRight: '5px' }}
-              />
-              Non-fire
-            </label>
-          </div>
-        )}
+        ))}
       </div>
 
       {/* Legend */}
       <div
-        id="pm25-legend"
         style={{
           position: 'absolute',
           bottom: '20px',
           right: '20px',
           backgroundColor: 'white',
-          padding: '10px',
+          padding: '15px',
           borderRadius: '4px',
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
           zIndex: 1,
-          minWidth: '150px'
+          minWidth: '180px'
         }}
       >
-        <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>
-          {activeLayer === 'avg_population' ? 'Population' : 
-           `${activePm25Type === 'total' ? 'Total' : activePm25Type === 'fire' ? 'Fire' : 'Non-fire'} PM2.5 (μg/m³)`}
+        <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>
+          {getMetricLabel()} (μg/m³)
         </div>
-        {(() => {
-          // Determine which color scale to use based on the active layer and PM2.5 type
-          const colors = activeLayer === 'avg_population' 
-            ? POPULATION_COLORS 
-            : activePm25Type === 'fire' 
-              ? PM25_COLORS_FIRE 
-              : PM25_COLORS_TOTAL;
+        {getColorScale(choroplethData).map(([value, color], i, arr) => {
+          const label = i === arr.length - 1
+            ? `${value.toFixed(1)}+`
+            : `${value.toFixed(1)} - ${arr[i + 1][0].toFixed(1)}`;
 
-          // Special handling for population values (show full numbers)
-          if (activeLayer === 'avg_population') {
-            return colors.map(([value, color], i, arr) => {
-              const label = i === arr.length - 1
-                ? `${value.toLocaleString()}+`
-                : `${value.toLocaleString()} - ${arr[i + 1][0].toLocaleString()}`;
-              return (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '2px' }}>
-                  <div style={{
-                    width: '20px',
-                    height: '15px',
-                    backgroundColor: color,
-                    marginRight: '5px',
-                    border: '1px solid #999'
-                  }}></div>
-                  <span>{label}</span>
-                </div>
-              );
-            });
-          }
-          
-          // For PM2.5 values (show with one decimal place)
-          return colors.map(([value, color], i, arr) => {
-            const label = i === arr.length - 1
-              ? `${value.toFixed(1)}+`
-              : `${value.toFixed(1)} - ${arr[i + 1][0].toFixed(1)}`;
-
-            return (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '2px' }}>
-                <div style={{
-                  width: '20px',
-                  height: '15px',
-                  backgroundColor: color,
-                  marginRight: '5px',
-                  border: '1px solid #999'
-                }}></div>
-                <span>{label} {activeLayer !== 'avg_population' ? '' : ''}</span>
-              </div>
-            );
-          });
-        })()}
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+              <div style={{
+                width: '20px',
+                height: '15px',
+                backgroundColor: color,
+                marginRight: '8px',
+                border: '1px solid #999'
+              }}></div>
+              <span style={{ fontSize: '0.9em' }}>{label}</span>
+            </div>
+          );
+        })}
       </div>
 
       {loading && (
@@ -701,14 +803,33 @@ const Map = ({ mapboxToken, stateAbbr }) => {
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          backgroundColor: 'rgba(255,255,255,0.7)',
+          backgroundColor: 'rgba(255,255,255,0.8)',
           zIndex: 2
         }}>
-          <div>Loading map data...</div>
+          <div style={{ 
+            padding: '20px',
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+          }}>
+            Loading map data...
+          </div>
         </div>
       )}
     </div>
   );
+};
+
+// Helper function to get metric label (outside component for reuse)
+const getMetricLabel = (metric) => {
+  const labels = {
+    'avg_total': 'Average Total PM2.5',
+    'avg_fire': 'Average Fire PM2.5',
+    'avg_nonfire': 'Average Non-fire PM2.5',
+    'max_total': 'Maximum Total PM2.5',
+    'max_fire': 'Maximum Fire PM2.5'
+  };
+  return labels[metric] || 'PM2.5';
 };
 
 export default React.memo(Map);

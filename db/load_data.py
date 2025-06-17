@@ -1,310 +1,547 @@
-import os
-import sys
-import logging
-import argparse
-from datetime import datetime, date
-from typing import Optional, Dict, Any, List, Tuple
-
 import pandas as pd
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
-from tqdm import tqdm
+import numpy as np
+import geopandas as gpd
+from datetime import datetime, date
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+import logging
+from pathlib import Path
+import sys
+import json
+from typing import Optional
 
-from .models import DailyPM25, County, Population
+# Import your models and database
+from .models import (
+    Base, County, DailyPM25, Population, Demographics,
+    YearlyPM25Summary, MonthlyPM25Summary, SeasonalPM25Summary
+)
+from .database import engine, SessionLocal
 
-# Configure logging
+# Set up logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('data_loading.log')
+        logging.FileHandler('data_loading.log'),
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
 
-def get_db_connection():
-    """Create a database connection."""
-    from db.database import engine, SessionLocal
-    return SessionLocal()
+class DataLoader:
+    def __init__(self, data_dir: str = "data"):
+        self.data_dir = Path(data_dir)
+        self.db = SessionLocal()
+        
+    def __enter__(self):
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.db.close()
 
-def parse_date(row: pd.Series) -> Optional[date]:
-    """Parse date from year, month, day columns."""
-    try:
-        # Check for NaN values in any of the date components
-        if pd.isna(row['Year']) or pd.isna(row['Month']) or pd.isna(row['Day']):
-            logger.debug(f"Skipping row with missing date components: {row.to_dict()}")
-            return None
-            
-        year = int(float(row['Year']))
-        month = int(float(row['Month']))
-        day = int(float(row['Day']))
-        
-        # Basic validation of date components
-        if not (1 <= month <= 12) or not (1 <= day <= 31) or year < 1900 or year > 2100:
-            logger.warning(f"Invalid date values - Year: {year}, Month: {month}, Day: {day}")
-            return None
-            
-        return date(year, month, day)
-        
-    except (ValueError, TypeError, KeyError) as e:
-        logger.warning(f"Error parsing date from row: {row.to_dict()}. Error: {str(e)}")
-        return None
+    def create_tables(self):
+        """Drop tables if they exist"""
+        logger.info("Dropping tables if they exist...")
+        Base.metadata.drop_all(bind=engine)
+        logger.info("Tables dropped successfully")
+        """Create all database tables"""
+        logger.info("Creating database tables...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("Tables created successfully")
 
-def load_daily_pm25(session: Session, csv_path: str, batch_size: int = 1000, skip_existing: bool = True) -> Tuple[int, int]:
-    """
-    Load daily PM2.5 data from CSV to database.
-    
-    Args:
-        session: Database session
-        csv_path: Path to the CSV file
-        batch_size: Number of records to insert in each batch
-        skip_existing: Skip records that already exist in the database
-        
-    Returns:
-        Tuple of (records_processed, records_inserted)
-    """
-    try:
-        if not os.path.exists(csv_path):
-            logger.error(f"CSV file not found: {csv_path}")
-            return 0, 0
+    def load_shapefiles(self, shapefile_path: Optional[str] = None):
+        """Load county geometries from shapefile"""
+        if shapefile_path is None:
+            shapefile_path = self.data_dir / "shapefiles" / "cb_2018_us_county_20m.shp"
             
-        logger.info(f"Reading data from {csv_path}")
-        df = pd.read_csv(csv_path, dtype={'FIPS': str})
+        logger.info(f"Loading county geometries from {shapefile_path}")
         
-        # Parse dates and filter out invalid rows
-        df['date'] = df.apply(parse_date, axis=1)
-        df = df[df['date'].notna()].copy()
-        
-        if df.empty:
-            logger.warning("No valid data to load")
-            return 0, 0
+        try:
+            # Read shapefile
+            gdf = gpd.read_file(shapefile_path)
             
-        # Ensure all CSV columns are present
-        required_csv_columns = ['Year', 'Month', 'Day', 'Value', 'fire_pm25', 'FIPS', 'County', 'CountyIndex']
-        if not all(col in df.columns for col in required_csv_columns):
-            missing = [col for col in required_csv_columns if col not in df.columns]
-            logger.error(f"Missing required columns in CSV: {missing}")
-            return 0, 0
+            # The Census shapefile uses GEOID for FIPS codes
+            if 'GEOID' in gdf.columns:
+                gdf['FIPS'] = gdf['GEOID']
+            elif 'FIPS' not in gdf.columns:
+                logger.error("Could not find FIPS/GEOID column in shapefile")
+                return
+                
+            # Ensure FIPS is string and properly formatted
+            gdf['FIPS'] = gdf['FIPS'].astype(str).str.zfill(5)
             
-        # Convert data types and clean data
-        df['CountyIndex'] = pd.to_numeric(df['CountyIndex'], errors='coerce').fillna(-1).astype(int)
-        df['Value'] = pd.to_numeric(df['Value'], errors='coerce')
-        df['fire_pm25'] = pd.to_numeric(df['fire_pm25'], errors='coerce').fillna(0)
-        
-        # Filter out any rows with invalid PM2.5 values
-        valid_pm25 = df['Value'].notna() & (df['Value'] >= 0)
-        df = df[valid_pm25].copy()
-        
-        if df.empty:
-            logger.warning("No valid PM2.5 data to load after filtering")
-            return 0, 0
+            # Simplify geometries for better performance (optional)
+            # gdf['geometry'] = gdf['geometry'].simplify(tolerance=0.01)
             
-        # Process in batches
-        total_records = len(df)
-        inserted_count = 0
-        
-        logger.info(f"Starting to load {total_records} records in batches of {batch_size}")
-        
-        # Process in batches
-        for i in tqdm(range(0, total_records, batch_size), desc="Loading data"):
-            batch = df.iloc[i:i + batch_size].copy()
+            # Convert to WGS84 if not already
+            if gdf.crs != 'EPSG:4326':
+                gdf = gdf.to_crs('EPSG:4326')
             
-            try:
-                # Prepare batch records - matching database schema
-                records = []
-                for _, row in batch.iterrows():
-                    try:
-                        # Calculate nonfire value
-                        value = float(row['Value'])
-                        fire_value = float(row['fire_pm25'])
-                        nonfire_value = value - fire_value
+            logger.info(f"Found {len(gdf)} counties in shapefile")
+            
+            # Convert geometries to GeoJSON and update database
+            updated_count = 0
+            for _, row in gdf.iterrows():
+                try:
+                    # Convert geometry to GeoJSON
+                    geojson = json.loads(gpd.GeoSeries([row.geometry]).to_json())
+                    geometry_dict = geojson['features'][0]['geometry']
+                    
+                    # Update county with geometry
+                    county = self.db.query(County).filter(County.fips == row['FIPS']).first()
+                    if county:
+                        county.geometry = geometry_dict
+                        updated_count += 1
+                    else:
+                        logger.warning(f"County with FIPS {row['FIPS']} not found in database")
                         
-                        record = {
-                            'date': row['date'],
-                            'total': value,  # Matches 'total' column in DB
-                            'fire': fire_value,  # Matches 'fire' column in DB
-                            'nonfire': nonfire_value,  # Matches 'nonfire' column in DB
-                            'fips': str(row['FIPS']).strip().zfill(5),  # Ensure proper FIPS formatting
-                            'county_index': int(row['CountyIndex'])  # Add county_index for easier matching
-                        }
-                        records.append(record)
-                    except (ValueError, KeyError) as e:
-                        logger.debug(f"Skipping invalid record: {row.to_dict()}. Error: {e}")
+                except Exception as e:
+                    logger.warning(f"Error processing geometry for FIPS {row['FIPS']}: {e}")
+                    continue
+                    
+                # Commit every 100 updates
+                if updated_count % 100 == 0:
+                    self.db.commit()
+                    logger.info(f"Updated {updated_count} county geometries...")
+            
+            # Final commit
+            self.db.commit()
+            logger.info(f"Successfully updated {updated_count} counties with geometries")
+            
+        except Exception as e:
+            logger.error(f"Error loading shapefiles: {e}")
+            self.db.rollback()
+            raise
+
+    def load_counties(self, fips_filepath: Optional[str] = None, shapefile_path: Optional[str] = None):
+        """Load county data from FIPScode.csv and geometries from shapefile"""
+        if fips_filepath is None:
+            fips_filepath = self.data_dir / "FIPScode.csv"
+        if shapefile_path is None:
+            shapefile_path = self.data_dir / "shapefiles" / "cb_2018_us_county_20m.shp"
+            
+        logger.info(f"Loading counties from {fips_filepath}")
+        
+        try:
+            # Read FIPS codes CSV
+            df = pd.read_csv(fips_filepath, dtype={'FIPS': str})
+            
+            # Clean column names (remove quotes if present)
+            df.columns = df.columns.str.strip().str.replace('"', '')
+            
+            # Ensure FIPS is properly formatted (5-digit string with leading zeros)
+            df['FIPS'] = df['FIPS'].str.zfill(5)
+            
+            # Read shapefile for geometries
+            logger.info(f"Reading shapefile from {shapefile_path}")
+            gdf = gpd.read_file(shapefile_path)
+            
+            # Handle FIPS column name in shapefile
+            if 'GEOID' in gdf.columns:
+                gdf['FIPS'] = gdf['GEOID']
+            elif 'FIPS' not in gdf.columns:
+                logger.warning("No FIPS/GEOID column found in shapefile")
+                gdf['FIPS'] = None
+            
+            if gdf['FIPS'] is not None:
+                gdf['FIPS'] = gdf['FIPS'].astype(str).str.zfill(5)
+                
+                # Convert to WGS84 if needed
+                if gdf.crs != 'EPSG:4326':
+                    gdf = gdf.to_crs('EPSG:4326')
+                
+                # Create geometry lookup
+                geometry_lookup = {}
+                for _, row in gdf.iterrows():
+                    try:
+                        geojson = json.loads(gpd.GeoSeries([row.geometry]).to_json())
+                        geometry_lookup[row['FIPS']] = geojson['features'][0]['geometry']
+                    except:
                         continue
+                        
+                logger.info(f"Loaded {len(geometry_lookup)} geometries from shapefile")
+            
+            logger.info(f"Found {len(df)} counties to load")
+            
+            # Batch insert counties with geometries
+            counties_to_insert = []
+            for idx, row in df.iterrows():
+                geometry = geometry_lookup.get(row['FIPS']) if 'geometry_lookup' in locals() else None
                 
-                # Convert records to model instances
-                pm25_instances = []
-                for record in records:
-                    pm25 = DailyPM25(
-                        date=record['date'],
-                        total=record['total'],
-                        fire=record['fire'],
-                        nonfire=record['nonfire'],
-                        fips=record['fips'],
-                        county_index=record['county_index']
-                    )
-                    pm25_instances.append(pm25)
+                county = County(
+                    fips=row['FIPS'],
+                    name=row['name'],
+                    index=idx + 1,
+                    geometry=geometry
+                )
+                counties_to_insert.append(county)
                 
-                # Add all instances to session
-                session.add_all(pm25_instances)
+                # Batch insert every 1000 records
+                if len(counties_to_insert) >= 1000:
+                    self.db.bulk_save_objects(counties_to_insert)
+                    self.db.commit()
+                    counties_to_insert = []
+                    logger.info(f"Inserted {idx + 1} counties...")
+            
+            # Insert remaining counties
+            if counties_to_insert:
+                self.db.bulk_save_objects(counties_to_insert)
+                self.db.commit()
+                
+            # Count how many have geometries
+            counties_with_geom = sum(1 for c in counties_to_insert if c.geometry is not None)
+            logger.info(f"Successfully loaded {len(df)} counties ({counties_with_geom} with geometries)")
+            
+        except Exception as e:
+            logger.error(f"Error loading counties: {e}")
+            self.db.rollback()
+            raise
+
+    def load_population_data(self, filepath: Optional[str] = None):
+        """Load population data from population_2013_2023.csv"""
+        if filepath is None:
+            filepath = self.data_dir / "population_2013_2023.csv"
+            
+        logger.info(f"Loading population data from {filepath}")
+        
+        try:
+            df = pd.read_csv(filepath)
+            
+            # Clean column names - remove quotes and whitespace
+            df.columns = df.columns.str.strip().str.replace('"', '')
+            logger.info(f"CSV columns: {list(df.columns)}")
+            
+            # Debug: Show first few rows
+            logger.info(f"First 3 rows of population data:")
+            logger.info(df.head(3).to_string())
+            
+            # Create a mapping from county_index to FIPS
+            county_mapping = {}
+            counties = self.db.query(County.index, County.fips).all()
+            for county in counties:
+                county_mapping[county.index] = county.fips
+                
+            logger.info(f"Created county mapping for {len(county_mapping)} counties")
+            logger.info(f"Sample county mapping: {dict(list(county_mapping.items())[:5])}")
+            logger.info(f"Found {len(df)} population records to load")
+            
+            # Prepare population data
+            population_data = []
+            processed_count = 0
+            matched_count = 0
+            
+            for _, row in df.iterrows():
+                processed_count += 1
                 
                 try:
-                    session.commit()
-                    inserted_count += len(pm25_instances)
-                except IntegrityError:
-                    if skip_existing:
-                        # If we hit a duplicate and skip_existing is True, rollback and try one by one
-                        session.rollback()
-                        for instance in pm25_instances:
-                            try:
-                                session.merge(instance)
-                                session.commit()
-                                inserted_count += 1
-                            except IntegrityError:
-                                session.rollback()
-                                continue
+                    county_index = int(row['county_index'])
+                    
+                    # Convert year_index to actual year
+                    # Based on your example: year_index 24 = year 2013
+                    # So the formula appears to be: year = year_index + 1989
+                    year_index = int(row['year_index'])
+                    actual_year = year_index + 1989
+                    
+                    # Verify with the 'year' column if it exists
+                    if 'year' in row and pd.notna(row['year']):
+                        expected_year = int(row['year'])
+                        if actual_year != expected_year:
+                            logger.warning(f"Year calculation mismatch: year_index {year_index} -> calculated {actual_year}, but CSV says {expected_year}")
+                            actual_year = expected_year  # Use the CSV year if there's a mismatch
+                    
+                    if county_index in county_mapping:
+                        matched_count += 1
+                        pop_record = Population(
+                            fips=county_mapping[county_index],
+                            year=actual_year,
+                            population=int(row['population']) if pd.notna(row['population']) else 0
+                        )
+                        population_data.append(pop_record)
+                        
+                        # Debug: Log first few matches
+                        if matched_count <= 5:
+                            logger.info(f"Match {matched_count}: county_index={county_index} -> fips={county_mapping[county_index]}, year_index={year_index} -> year={actual_year}, pop={row['population']}")
+                            
                     else:
-                        # If skip_existing is False, let the error propagate
-                        session.rollback()
-                        raise
-                    
-            except Exception as e:
-                session.rollback()
-                logger.error(f"Error inserting batch {i//batch_size + 1}: {e}")
-                continue
-        
-        logger.info(f"Successfully loaded {inserted_count} out of {total_records} records")
-        return total_records, inserted_count
-        
-    except Exception as e:
-        logger.error(f"Error in load_daily_pm25: {e}", exc_info=True)
-        session.rollback()
-        return 0, 0
-
-def load_population_data(session: Session, csv_path: str) -> Tuple[int, int]:
-    """Load population data from CSV to database."""
-    try:
-        if not os.path.exists(csv_path):
-            logger.error(f"Population CSV file not found: {csv_path}")
-            return 0, 0
-            
-        logger.info(f"Loading population data from {csv_path}")
-        df = pd.read_csv(csv_path)
-        
-        # Ensure required columns exist
-        required_columns = ['county_index', 'year', 'population']
-        if not all(col in df.columns for col in required_columns):
-            missing = [col for col in required_columns if col not in df.columns]
-            logger.error(f"Missing required columns: {missing}")
-            return 0, 0
-        
-        # Get county mapping
-        county_map = {c.index: c.fips for c in session.query(County).all()}
-        
-        total_records = len(df)
-        inserted_count = 0
-        
-        for _, row in tqdm(df.iterrows(), total=total_records, desc="Loading population data"):
-            try:
-                fips = county_map.get(int(row['county_index']))
-                if not fips:
-                    logger.warning(f"No FIPS found for county_index {row['county_index']}")
+                        logger.warning(f"County index {county_index} not found in counties table")
+                        
+                    # Batch insert every 1000 records
+                    if len(population_data) >= 1000:
+                        self.db.bulk_save_objects(population_data)
+                        self.db.commit()
+                        logger.info(f"Inserted batch of {len(population_data)} population records...")
+                        population_data = []
+                        
+                except Exception as e:
+                    logger.warning(f"Error processing row {processed_count}: {e}")
+                    logger.warning(f"Row data: {dict(row)}")
                     continue
+            
+            # Insert remaining records
+            if population_data:
+                self.db.bulk_save_objects(population_data)
+                self.db.commit()
+                logger.info(f"Inserted final batch of {len(population_data)} population records")
                 
-                # Check if record already exists
-                exists = session.query(Population).filter_by(
-                    fips=fips,
-                    year=int(row['year'])
-                ).first()
+            logger.info(f"Population loading summary:")
+            logger.info(f"  Total rows processed: {processed_count}")
+            logger.info(f"  Successfully matched: {matched_count}")
+            logger.info(f"  Records inserted: {matched_count}")
+            
+            # Verify insertion
+            total_in_db = self.db.query(Population).count()
+            logger.info(f"Total population records in database: {total_in_db}")
+            
+        except Exception as e:
+            logger.error(f"Error loading population data: {e}")
+            self.db.rollback()
+            raise
+
+    def load_pm25_data(self, filepath: Optional[str] = None, chunk_size: int = 10000):
+        """Load PM2.5 data from daily_county_data_combined.csv"""
+        if filepath is None:
+            filepath = self.data_dir / "daily_county_data_combined.csv"
+            
+        logger.info(f"Loading PM2.5 data from {filepath}")
+        
+        try:
+            # Read CSV in chunks to handle large file
+            total_records = 0
+            chunk_count = 0
+            
+            for chunk in pd.read_csv(filepath, chunksize=chunk_size, dtype={'FIPS': str}):
+                chunk_count += 1
+                logger.info(f"Processing chunk {chunk_count} ({len(chunk)} records)")
                 
-                if exists:
-                    # Update existing record
-                    exists.population = int(row['population'])
-                else:
-                    # Insert new record
-                    record = Population(
-                        fips=fips,
-                        year=int(row['year']),
-                        population=int(row['population'])
-                    )
-                    session.add(record)
+                # Clean column names
+                chunk.columns = chunk.columns.str.strip().str.replace('"', '')
                 
-                inserted_count += 1
+                # Ensure FIPS is properly formatted
+                chunk['FIPS'] = chunk['FIPS'].str.zfill(5)
                 
-                # Commit periodically
-                if inserted_count % 1000 == 0:
-                    session.commit()
-                    
+                # Create date column
+                chunk['date'] = pd.to_datetime(
+                    chunk[['Year', 'Month', 'Day']], 
+                    errors='coerce'
+                )
+                
+                # Remove rows with invalid dates
+                chunk = chunk.dropna(subset=['date'])
+                
+                # Calculate non-fire PM2.5
+                chunk['nonfire_pm25'] = chunk['total_value'] - chunk['fire_pm25']
+                chunk['nonfire_pm25'] = chunk['nonfire_pm25'].clip(lower=0)  # Ensure non-negative
+                
+                # Prepare PM2.5 records
+                pm25_records = []
+                for _, row in chunk.iterrows():
+                    try:
+                        pm25_record = DailyPM25(
+                            fips=row['FIPS'],
+                            county_index=int(row['county_index']),
+                            date=row['date'].date(),
+                            total=float(row['total_value']) if pd.notna(row['total_value']) else 0.0,
+                            fire=float(row['fire_pm25']) if pd.notna(row['fire_pm25']) else 0.0,
+                            nonfire=float(row['nonfire_pm25']) if pd.notna(row['nonfire_pm25']) else 0.0
+                        )
+                        pm25_records.append(pm25_record)
+                    except Exception as e:
+                        logger.warning(f"Skipping invalid record: {e}")
+                        continue
+                
+                # Bulk insert
+                if pm25_records:
+                    self.db.bulk_save_objects(pm25_records)
+                    self.db.commit()
+                    total_records += len(pm25_records)
+                    logger.info(f"Inserted {len(pm25_records)} PM2.5 records (Total: {total_records})")
+                
+            logger.info(f"Successfully loaded {total_records} PM2.5 records")
+            
+        except Exception as e:
+            logger.error(f"Error loading PM2.5 data: {e}")
+            self.db.rollback()
+            raise
+
+    def create_indexes(self):
+        """Create additional indexes for performance"""
+        logger.info("Creating additional indexes...")
+        
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_daily_pm25_date_fips ON daily_pm25(date, fips);",
+            "CREATE INDEX IF NOT EXISTS idx_daily_pm25_fips_date ON daily_pm25(fips, date);",
+            "CREATE INDEX IF NOT EXISTS idx_daily_pm25_year_fips ON daily_pm25(EXTRACT(year FROM date), fips);",
+            "CREATE INDEX IF NOT EXISTS idx_daily_pm25_year_month_fips ON daily_pm25(EXTRACT(year FROM date), EXTRACT(month FROM date), fips);",
+            "CREATE INDEX IF NOT EXISTS idx_yearly_summary_year ON yearly_pm25_summary(year);",
+            "CREATE INDEX IF NOT EXISTS idx_monthly_summary_year_month ON monthly_pm25_summary(year, month);",
+            "CREATE INDEX IF NOT EXISTS idx_seasonal_summary_year_season ON seasonal_pm25_summary(year, season);",
+        ]
+        
+        for index_sql in indexes:
+            try:
+                self.db.execute(text(index_sql))
+                self.db.commit()
+                logger.info(f"Created index: {index_sql.split('ON')[1].split('(')[0].strip()}")
             except Exception as e:
-                session.rollback()
-                logger.error(f"Error processing row {row.to_dict()}: {e}")
-                continue
+                logger.warning(f"Index creation failed (may already exist): {e}")
+
+    def preprocess_aggregations(self):
+        """Generate pre-aggregated tables for fast queries"""
+        logger.info("Starting aggregation preprocessing...")
         
-        session.commit()
-        logger.info(f"Successfully processed {inserted_count} out of {total_records} population records")
-        return total_records, inserted_count
+        try:
+            # Clear existing aggregations
+            logger.info("Clearing existing aggregations...")
+            self.db.query(YearlyPM25Summary).delete()
+            self.db.query(MonthlyPM25Summary).delete()
+            self.db.query(SeasonalPM25Summary).delete()
+            self.db.commit()
+            
+            # YEARLY AGGREGATIONS
+            logger.info("Processing yearly aggregations...")
+            yearly_query = text("""
+                INSERT INTO yearly_pm25_summary (fips, year, avg_total, avg_fire, avg_nonfire, max_total, max_fire, days_count)
+                SELECT 
+                    fips,
+                    EXTRACT(year FROM date) as year,
+                    AVG(total) as avg_total,
+                    AVG(fire) as avg_fire,
+                    AVG(nonfire) as avg_nonfire,
+                    MAX(total) as max_total,
+                    MAX(fire) as max_fire,
+                    COUNT(*) as days_count
+                FROM daily_pm25
+                GROUP BY fips, EXTRACT(year FROM date)
+            """)
+            self.db.execute(yearly_query)
+            self.db.commit()
+            
+            # MONTHLY AGGREGATIONS
+            logger.info("Processing monthly aggregations...")
+            monthly_query = text("""
+                INSERT INTO monthly_pm25_summary (fips, year, month, avg_total, avg_fire, avg_nonfire, max_total, max_fire, days_count)
+                SELECT 
+                    fips,
+                    EXTRACT(year FROM date) as year,
+                    EXTRACT(month FROM date) as month,
+                    AVG(total) as avg_total,
+                    AVG(fire) as avg_fire,
+                    AVG(nonfire) as avg_nonfire,
+                    MAX(total) as max_total,
+                    MAX(fire) as max_fire,
+                    COUNT(*) as days_count
+                FROM daily_pm25
+                GROUP BY fips, EXTRACT(year FROM date), EXTRACT(month FROM date)
+            """)
+            self.db.execute(monthly_query)
+            self.db.commit()
+            
+            # SEASONAL AGGREGATIONS
+            logger.info("Processing seasonal aggregations...")
+            seasonal_query = text("""
+                INSERT INTO seasonal_pm25_summary (fips, year, season, avg_total, avg_fire, avg_nonfire, max_total, max_fire, days_count)
+                SELECT 
+                    fips,
+                    EXTRACT(year FROM date) as year,
+                    CASE 
+                        WHEN EXTRACT(month FROM date) IN (12, 1, 2) THEN 'winter'
+                        WHEN EXTRACT(month FROM date) IN (3, 4, 5) THEN 'spring'
+                        WHEN EXTRACT(month FROM date) IN (6, 7, 8) THEN 'summer'
+                        ELSE 'fall'
+                    END as season,
+                    AVG(total) as avg_total,
+                    AVG(fire) as avg_fire,
+                    AVG(nonfire) as avg_nonfire,
+                    MAX(total) as max_total,
+                    MAX(fire) as max_fire,
+                    COUNT(*) as days_count
+                FROM daily_pm25
+                GROUP BY fips, EXTRACT(year FROM date), 
+                    CASE 
+                        WHEN EXTRACT(month FROM date) IN (12, 1, 2) THEN 'winter'
+                        WHEN EXTRACT(month FROM date) IN (3, 4, 5) THEN 'spring'
+                        WHEN EXTRACT(month FROM date) IN (6, 7, 8) THEN 'summer'
+                        ELSE 'fall'
+                    END
+            """)
+            self.db.execute(seasonal_query)
+            self.db.commit()
+            
+            logger.info("All aggregations processed successfully!")
+            
+        except Exception as e:
+            logger.error(f"Error during aggregation preprocessing: {e}")
+            self.db.rollback()
+            raise
+
+    def validate_data(self):
+        """Validate loaded data"""
+        logger.info("Validating loaded data...")
         
-    except Exception as e:
-        logger.error(f"Error in load_population_data: {e}", exc_info=True)
-        session.rollback()
-        return 0, 0
+        try:
+            # Count records in each table
+            county_count = self.db.query(County).count()
+            pm25_count = self.db.query(DailyPM25).count()
+            population_count = self.db.query(Population).count()
+            yearly_count = self.db.query(YearlyPM25Summary).count()
+            monthly_count = self.db.query(MonthlyPM25Summary).count()
+            seasonal_count = self.db.query(SeasonalPM25Summary).count()
+            
+            logger.info(f"Data validation results:")
+            logger.info(f"  Counties: {county_count:,}")
+            logger.info(f"  Daily PM2.5 records: {pm25_count:,}")
+            logger.info(f"  Population records: {population_count:,}")
+            logger.info(f"  Yearly summaries: {yearly_count:,}")
+            logger.info(f"  Monthly summaries: {monthly_count:,}")
+            logger.info(f"  Seasonal summaries: {seasonal_count:,}")
+            
+            # Check for data quality issues
+            null_dates = self.db.query(DailyPM25).filter(DailyPM25.date.is_(None)).count()
+            negative_pm25 = self.db.query(DailyPM25).filter(DailyPM25.total < 0).count()
+            
+            if null_dates > 0:
+                logger.warning(f"Found {null_dates} records with null dates")
+            if negative_pm25 > 0:
+                logger.warning(f"Found {negative_pm25} records with negative PM2.5 values")
+                
+            logger.info("Data validation completed")
+            
+        except Exception as e:
+            logger.error(f"Error during data validation: {e}")
+            raise
 
 def main():
-    """Main function to handle command line arguments."""
-    parser = argparse.ArgumentParser(description='Load PM2.5 and population data into the database.')
-    parser.add_argument('--fips-csv', default='data/FIPScode.csv',
-                      help='Path to FIPS codes CSV file (default: data/FIPScode.csv)')
-    parser.add_argument('--pm25-csv', default='data/daily_county_data_combined.csv',
-                      help='Path to PM2.5 data CSV file (default: data/daily_county_data_combined.csv)')
-    parser.add_argument('--population-csv', default='data/population_2013_2023.csv',
-                      help='Path to population data CSV file (default: data/population_2013_2023.csv)')
-    parser.add_argument('--batch-size', type=int, default=1000,
-                      help='Number of records to process in each batch (default: 1000)')
-    parser.add_argument('--skip-existing', action='store_true',
-                      help='Skip records that already exist in the database')
+    """Main function to load all data"""
+    logger.info("=== Starting Data Loading Process ===")
     
-    args = parser.parse_args()
-    
-    db = get_db_connection()
     try:
-        logger.info("Starting data loading process")
+        with DataLoader() as loader:
+            # Step 1: Create tables
+            loader.create_tables()
+            
+            # Step 2: Load counties
+            loader.load_counties()
+            
+            # Step 3: Load population data
+            loader.load_population_data()
+            
+            # Step 4: Load PM2.5 data (this will take the longest)
+            loader.load_pm25_data()
+            
+            # Step 5: Create indexes
+            loader.create_indexes()
+            
+            # Step 6: Generate aggregations
+            loader.preprocess_aggregations()
+            
+            # Step 7: Validate data
+            loader.validate_data()
+            
+        logger.info("=== Data Loading Process Completed Successfully ===")
         
-        # First load counties
-        from .load_counties import load_counties as load_counties_func
-        logger.info(f"Loading counties data from {args.fips_csv}...")
-        total_counties, loaded_counties = load_counties_func(db, args.fips_csv)
-        logger.info(f"Loaded {loaded_counties} out of {total_counties} counties.")
-        
-        # Then load PM2.5 data
-        logger.info("Loading PM2.5 data...")
-        total_pm25, inserted_pm25 = load_daily_pm25(
-            db, 
-            args.pm25_csv, 
-            batch_size=args.batch_size,
-            skip_existing=args.skip_existing
-        )
-        
-        # Finally load population data
-        logger.info("Loading population data...")
-        total_pop, inserted_pop = load_population_data(
-            db,
-            args.population_csv
-        )
-        
-        logger.info(f"Data loading completed. "
-                   f"Counties: {loaded_counties}/{total_counties}, "
-                   f"PM2.5: {inserted_pm25}/{total_pm25}, "
-                   f"Population: {inserted_pop}/{total_pop}")
-                   
     except Exception as e:
-        logger.error(f"Error in main: {e}", exc_info=True)
-        return 1
-    finally:
-        db.close()
-    
-    return 0
+        logger.error(f"Data loading failed: {e}")
+        raise
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

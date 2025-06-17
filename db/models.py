@@ -16,6 +16,9 @@ class County(Base):
     pm25_data = relationship("DailyPM25", back_populates="county")
     populations = relationship("Population", back_populates="county")
     demographics = relationship("Demographics", back_populates="county")
+    yearly_summaries = relationship("YearlyPM25Summary", back_populates="county")
+    monthly_summaries = relationship("MonthlyPM25Summary", back_populates="county")
+    seasonal_summaries = relationship("SeasonalPM25Summary", back_populates="county")
 
 class DailyPM25(Base):
     __tablename__ = "daily_pm25"
@@ -28,9 +31,9 @@ class DailyPM25(Base):
     fire = Column(Float, nullable=False)    # Fire-related PM2.5
     nonfire = Column(Float, nullable=False)  # Non-fire PM2.5
     
+    # Fixed: Only one __table_args__ definition
     __table_args__ = (
-        # Existing unique constraint
-        {'postgresql_using': 'btree'},  # Use btree index by default
+        UniqueConstraint("fips", "date", name="_fips_date_uc"),
     )
 
     county = relationship("County", back_populates="pm25_data")
@@ -73,8 +76,6 @@ class DailyPM25(Base):
     def day(cls):
         return extract('day', cls.date)
 
-    __table_args__ = (UniqueConstraint("fips", "date", name="_fips_date_uc"),)
-
 class Population(Base):
     __tablename__ = "population"
 
@@ -98,3 +99,66 @@ class Demographics(Base):
     county = relationship("County", back_populates="demographics")
 
     __table_args__ = (UniqueConstraint("fips", "metric", name="_fips_metric_uc"),)
+
+class YearlyPM25Summary(Base):
+    __tablename__ = "yearly_pm25_summary"
+    
+    fips = Column(String, ForeignKey("counties.fips"), primary_key=True)  # Fixed: Added ForeignKey
+    year = Column(Integer, primary_key=True)
+    
+    # Aggregated values
+    avg_total = Column(Float, nullable=False)
+    avg_fire = Column(Float, nullable=False) 
+    avg_nonfire = Column(Float, nullable=False)
+    
+    max_total = Column(Float, nullable=False)
+    max_fire = Column(Float, nullable=False)
+    
+    # Metadata
+    days_count = Column(Integer, nullable=False)  # for data quality checks
+    
+    county = relationship("County", back_populates="yearly_summaries")  # Fixed: Added back_populates
+
+class MonthlyPM25Summary(Base):
+    __tablename__ = "monthly_pm25_summary"
+    
+    fips = Column(String, ForeignKey("counties.fips"), primary_key=True)  # Fixed: Added ForeignKey
+    year = Column(Integer, primary_key=True)
+    month = Column(Integer, primary_key=True)
+    
+    avg_total = Column(Float, nullable=False)
+    avg_fire = Column(Float, nullable=False)
+    avg_nonfire = Column(Float, nullable=False)
+    
+    max_total = Column(Float, nullable=False)
+    max_fire = Column(Float, nullable=False)
+    
+    days_count = Column(Integer, nullable=False)
+    
+    county = relationship("County", back_populates="monthly_summaries")  # Fixed: Added back_populates
+
+class SeasonalPM25Summary(Base):
+    __tablename__ = "seasonal_pm25_summary"
+    
+    fips = Column(String, ForeignKey("counties.fips"), primary_key=True)  # Fixed: Added ForeignKey
+    year = Column(Integer, primary_key=True)
+    season = Column(String, primary_key=True)  # 'spring', 'summer', 'fall', 'winter'
+    
+    avg_total = Column(Float, nullable=False)
+    avg_fire = Column(Float, nullable=False)
+    avg_nonfire = Column(Float, nullable=False)
+    
+    max_total = Column(Float, nullable=False)
+    max_fire = Column(Float, nullable=False)
+    
+    days_count = Column(Integer, nullable=False)
+    
+    county = relationship("County", back_populates="seasonal_summaries")  # Fixed: Added back_populates
+
+# Add indexes for fast queries
+# Run after creating tables:
+"""
+CREATE INDEX idx_yearly_summary_year ON yearly_pm25_summary(year);
+CREATE INDEX idx_monthly_summary_year_month ON monthly_pm25_summary(year, month);
+CREATE INDEX idx_seasonal_summary_year_season ON seasonal_pm25_summary(year, season);
+"""

@@ -2,23 +2,29 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 import os
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, Depends, status, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Depends, status, Request, Response, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import func, and_, or_, extract, select
+from sqlalchemy import func, and_, or_, extract, select, text
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.sql.expression import case
+from functools import lru_cache
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 # Application imports
 from db.database import SessionLocal, engine, Base
-from db.models import DailyPM25, County, Population
+from db.models import (
+    DailyPM25, County, Population, Demographics,
+    YearlyPM25Summary, MonthlyPM25Summary, SeasonalPM25Summary
+)
 
 import geopandas as gpd
 from shapely.geometry import mapping, shape
@@ -26,6 +32,24 @@ import warnings
 
 # Suppress warnings from GeoPandas
 warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('app.log')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Create database tables if they don't exist
+# Base.metadata.create_all(bind=engine)
+
+# Cache configuration
+CACHE_TTL = 300  # 5 minutes
+executor = ThreadPoolExecutor(max_workers=4)
 
 # Load county geometries once at startup
 COUNTY_GEOMETRIES = None
@@ -50,7 +74,6 @@ def load_county_geometries():
             # Convert to GeoJSON and index by FIPS code
             COUNTY_GEOMETRIES = {}
             for _, row in gdf.iterrows():
-                # Convert the row to a GeoJSON feature
                 feature = {
                     'type': 'Feature',
                     'geometry': mapping(row['geometry']),
@@ -71,23 +94,6 @@ def load_county_geometries():
     
     return COUNTY_GEOMETRIES
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('app.log')
-    ]
-)
-logger = logging.getLogger(__name__)
-
-# Create database tables if they don't exist
-Base.metadata.create_all(bind=engine)
-
-# Cache configuration
-CACHE_TTL = 300  # 5 minutes
-
 # Application lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -95,37 +101,33 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up...")
     
     # Create database tables if they don't exist
-    Base.metadata.create_all(bind=engine)
+    # Base.metadata.create_all(bind=engine)
+    
+    # Load county geometries
+    load_county_geometries()
     
     yield
     
     # Shutdown: Clean up resources
     logger.info("Shutting down...")
+    executor.shutdown(wait=True)
 
 # Initialize FastAPI app with lifespan
 app = FastAPI(
     title="PM2.5 Wildfire Dashboard",
-    description="API for accessing PM2.5 wildfire data",
-    version="1.0.0",
+    description="API for accessing PM2.5 wildfire data with preprocessed summaries",
+    version="2.0.0",
     lifespan=lifespan
 )
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins for development
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"]   # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"]
 )
-
-# Paths
-BASE_DIR = '/Users/hassankhan/Desktop/HMEI/Project/'
-DATA_DIR = BASE_DIR + "data/"
-COUNTIES_SHP = DATA_DIR + "shapefiles/cb_2018_us_county_20m.shp"
-POPULATION_CSV = DATA_DIR + "population_2021_2023.csv"
-FIPS_CSV = DATA_DIR + "FIPScode.csv"
-DAILY_DATA_CSV = DATA_DIR + "daily_county_data_combined.csv"
 
 # Database session dependency
 def get_db():
@@ -143,6 +145,7 @@ def get_db():
     finally:
         db.close()
 
+# Helper functions
 def get_season_date_range(year: int, season: str):
     season = season.lower()
     if season == "winter":
@@ -161,9 +164,6 @@ def get_season_date_range(year: int, season: str):
         raise ValueError("Invalid season")
     return start_date, end_date
 
-
-
-# Helper function to parse and validate date input
 def parse_flexible_date(date_str: str) -> date:
     """Parse a date string into a date object with flexible format."""
     try:
@@ -179,433 +179,538 @@ def parse_flexible_date(date_str: str) -> date:
             detail=f"Invalid date format: {date_str}. Use YYYY, YYYY-MM, or YYYY-MM-DD."
         ) from e
 
+def get_season_from_date(date_obj: date) -> str:
+    """Determine season from a date."""
+    month = date_obj.month
+    day = date_obj.day
+    
+    if (month == 12 and day >= 21) or month in [1, 2] or (month == 3 and day < 21):
+        return "winter"
+    elif (month == 3 and day >= 21) or month in [4, 5] or (month == 6 and day < 21):
+        return "spring"
+    elif (month == 6 and day >= 21) or month in [7, 8] or (month == 9 and day < 21):
+        return "summer"
+    else:
+        return "fall"
 
-# Helper function to parse and validate date input
-def parse_date(date_str: str) -> date:
-    """Parse date string to date object with validation."""
+# Data preprocessing functions
+async def preprocess_summary_data(db: Session):
+    """Preprocess and populate summary tables for faster queries."""
     try:
-        return datetime.strptime(date_str, "%Y-%m-%d").date()
-    except ValueError as e:
-        logger.warning(f"Invalid date format: {date_str}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid date format: {date_str}. Use YYYY-MM-DD."
-        ) from e
-
-# Cache for frequently accessed data
-from functools import lru_cache
-
-@lru_cache(maxsize=1000)
-def get_cached_pm25_data(
-    fips: str,
-    start_date: date,
-    end_date: date,
-    period: str
-) -> List[Dict[str, Any]]:
-    """Get PM2.5 data with caching for better performance."""
-    db = SessionLocal()
-    try:
-        # Base query with correct column names from our schema
-        query = db.query(
-            extract('year', DailyPM25.date).label("year"),
-            extract('month', DailyPM25.date).label("month"),
-            extract('day', DailyPM25.date).label("day"),
-            func.avg(DailyPM25.total).label("avg_total_pm25"),
-            func.avg(DailyPM25.fire).label("avg_fire_pm25"),
-        ).filter(
-            DailyPM25.fips == fips,
-            DailyPM25.date.between(start_date, end_date)
+        logger.info("Starting data preprocessing...")
+        
+        # Clear existing summary data
+        db.query(YearlyPM25Summary).delete()
+        db.query(MonthlyPM25Summary).delete()
+        db.query(SeasonalPM25Summary).delete()
+        
+        # Generate yearly summaries
+        yearly_query = db.query(
+            DailyPM25.fips,
+            extract('year', DailyPM25.date).label('year'),
+            func.avg(DailyPM25.total).label('avg_total'),
+            func.avg(DailyPM25.fire).label('avg_fire'),
+            func.avg(DailyPM25.nonfire).label('avg_nonfire'),
+            func.max(DailyPM25.total).label('max_total'),
+            func.max(DailyPM25.fire).label('max_fire'),
+            func.count().label('days_count')
+        ).group_by(
+            DailyPM25.fips,
+            extract('year', DailyPM25.date)
         )
         
-        # Apply grouping based on period
-        if period == "yearly":
-            query = query.group_by(extract('year', DailyPM25.date))
-        elif period == "monthly":
-            query = query.group_by(
-                extract('year', DailyPM25.date),
-                extract('month', DailyPM25.date)
-            )
+        yearly_results = yearly_query.all()
+        yearly_summaries = []
         
-        results = query.order_by("year", "month", "day").all()
+        for result in yearly_results:
+            yearly_summaries.append(YearlyPM25Summary(
+                fips=result.fips,
+                year=int(result.year),
+                avg_total=float(result.avg_total),
+                avg_fire=float(result.avg_fire),
+                avg_nonfire=float(result.avg_nonfire),
+                max_total=float(result.max_total),
+                max_fire=float(result.max_fire),
+                days_count=int(result.days_count)
+            ))
         
-        return [
-            {
-                "year": int(r.year) if r.year else None,
-                "month": int(r.month) if hasattr(r, 'month') and r.month is not None else None,
-                "day": int(r.day) if hasattr(r, 'day') and r.day is not None else None,
-                "avg_total_pm25": float(r.avg_total_pm25) if r.avg_total_pm25 is not None else None,
-                "avg_fire_pm25": float(r.avg_fire_pm25) if r.avg_fire_pm25 is not None else None,
-                "avg_nonfire_pm25": float(r.avg_total_pm25 - r.avg_fire_pm25) 
-                    if r.avg_total_pm25 is not None and r.avg_fire_pm25 is not None 
-                    else None,
-            }
-            for r in results
-        ]
-    except Exception as e:
-        logger.error(f"Error fetching PM2.5 data: {str(e)}", exc_info=True)
-        raise
-    finally:
-        db.close()
-
-@app.get("/api/pm25/{fips}", response_model=Dict[str, Any])
-async def get_pm25(
-    request: Request,
-    fips: str,
-    period: str = Query("yearly", pattern="^(daily|monthly|seasonal|yearly|custom)$"),
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    season: Optional[str] = None,
-    year: Optional[int] = None,
-    db: Session = Depends(get_db),
-):
-    """
-    Get PM2.5 data for a specific county and time period.
-    
-    Parameters:
-    - fips: County FIPS code
-    - period: Time period aggregation ('daily', 'monthly', 'seasonal', 'yearly', 'custom')
-    - start_date: Start date (YYYY, YYYY-MM, or YYYY-MM-DD), required for 'custom' period
-    - end_date: End date (YYYY, YYYY-MM, or YYYY-MM-DD), required for 'custom' period
-    - season: Season name (e.g., 'winter', 'spring', 'summer', 'fall'), required for 'seasonal' period
-    - year: Year (YYYY), required for 'seasonal' period
-    
-    Returns:
-    - JSON response with PM2.5 data and metadata
-    """
-    try:
-        # Validate FIPS code exists
-        county = db.query(County).filter(County.fips == fips).first()
-        if not county:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"County with FIPS code {fips} not found"
-            )
+        db.bulk_save_objects(yearly_summaries)
         
-        # Handle different time periods
-        if period == "custom":
-            if not start_date or not end_date:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="start_date and end_date are required for custom period"
-                )
-                
-            # Parse dates with flexible format
-            start = parse_flexible_date(start_date)
-            end = parse_flexible_date(end_date)
-            
-            # Adjust end date based on input format
-            if len(end_date) == 4:  # Year only
-                end = datetime(end.year, 12, 31).date()
-            elif len(end_date) == 7:  # Year and month
-                next_month = datetime(end.year, end.month % 12 + 1, 1) if end.month < 12 else datetime(end.year + 1, 1, 1)
-                end = (next_month - timedelta(days=1)).date()
-            
-            # Ensure end date is not before start date
-            if end < start:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="end_date must be after start_date"
-                )
-                
-            # Get data for the custom date range
-            data = get_cached_pm25_data(fips, start, end, period)
-            
-            return {
-                "fips": fips,
-                "county_name": county.name,
-                "period": "custom",
-                "start_date": start.isoformat(),
-                "end_date": end.isoformat(),
-                "data": data
-            }
-            
-        elif period == "seasonal":
-            if not season or not year:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="season and year are required for seasonal period"
-                )
-            try:
-                start, end = get_season_date_range(year, season)
-            except ValueError as e:
-                logger.warning(f"Invalid season: {season}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid season: {season}. Must be one of: winter, spring, summer, fall"
-                ) from e
-
-        elif period == "yearly":
-            # Default to full date range if not specified
-            start = date(2013, 1, 1)
-            end = date(2023, 12, 31)
-        
-        # Log the request
-        logger.info(f"Fetching PM2.5 data for FIPS: {fips}, Period: {period}, "
-                   f"Start: {start}, End: {end}")
-        
-        # Get data from cache or database
-        data = get_cached_pm25_data(fips, start, end, period)
-        
-        if not data:
-            logger.warning(f"No data found for FIPS: {fips} in the specified date range")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No data found for the specified parameters"
-            )
-            
-        return {
-            "period": period,
-            "fips": fips,
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
-            "data": data
-        }
-        
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
-    except Exception as e:
-        # Log unexpected errors
-        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An unexpected error occurred: {str(e)}"
-        ) from e
-
-@app.get("/api/pm25/bar_chart/{fips}")
-def get_pm25_bar_chart(
-    fips: str,
-    period: str = Query("yearly", pattern="^(daily|monthly|seasonal|yearly|custom)$"),
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    season: Optional[str] = None,
-    year: Optional[int] = None,
-    db: Session = Depends(get_db),
-):
-    # Reuse date parsing helper
-    def parse_date(s):
-        try:
-            return datetime.strptime(s, "%Y-%m-%d").date()
-        except:
-            raise HTTPException(status_code=400, detail=f"Invalid date format: {s}. Use YYYY-MM-DD.")
-
-    # Determine date range based on period
-    if period in ["custom", "daily", "monthly"]:
-        if not start_date or not end_date:
-            raise HTTPException(status_code=400, detail="start_date and end_date required for this period")
-        start = parse_date(start_date)
-        end = parse_date(end_date)
-        if start > end:
-            raise HTTPException(status_code=400, detail="start_date must be before or equal to end_date")
-
-    elif period == "seasonal":
-        if not season or not year:
-            raise HTTPException(status_code=400, detail="season and year required for seasonal period")
-        try:
-            start, end = get_season_date_range(year, season)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid season")
-
-    elif period == "yearly":
-        start = date(2013, 1, 1)
-        end = date(2023, 12, 31)
-
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported period")
-
-    # Query PM2.5 for the date range and fips
-    query = db.query(
-        extract('year', DailyPM25.date).label("year"),
-        extract('month', DailyPM25.date).label("month"),
-        extract('day', DailyPM25.date).label("day"),
-        func.avg(DailyPM25.total).label("avg_total_pm25"),
-        func.avg(DailyPM25.fire).label("avg_fire_pm25"),
-    ).filter(
-        DailyPM25.fips == fips,
-        DailyPM25.date.between(start, end)
-    )
-
-    # Grouping depends on period
-    if period == "yearly":
-        query = query.group_by(extract('year', DailyPM25.date)).order_by(extract('year', DailyPM25.date))
-        results = query.all()
-        data = [
-            {
-                "year": int(r.year) if r.year else None,
-                "avg_total_pm25": float(r.avg_total_pm25) if r.avg_total_pm25 is not None else None,
-                "avg_fire_pm25": float(r.avg_fire_pm25) if r.avg_fire_pm25 is not None else None,
-                "avg_nonfire_pm25": float(r.avg_total_pm25 - r.avg_fire_pm25) 
-                    if r.avg_total_pm25 is not None and r.avg_fire_pm25 is not None 
-                    else None,
-            } for r in results
-        ]
-
-    elif period == "monthly":
-        query = query.group_by(
-            extract('year', DailyPM25.date),
-            extract('month', DailyPM25.date)
-        ).order_by(
+        # Generate monthly summaries
+        monthly_query = db.query(
+            DailyPM25.fips,
+            extract('year', DailyPM25.date).label('year'),
+            extract('month', DailyPM25.date).label('month'),
+            func.avg(DailyPM25.total).label('avg_total'),
+            func.avg(DailyPM25.fire).label('avg_fire'),
+            func.avg(DailyPM25.nonfire).label('avg_nonfire'),
+            func.max(DailyPM25.total).label('max_total'),
+            func.max(DailyPM25.fire).label('max_fire'),
+            func.count().label('days_count')
+        ).group_by(
+            DailyPM25.fips,
             extract('year', DailyPM25.date),
             extract('month', DailyPM25.date)
         )
-        results = query.all()
-        data = [
-            {
-                "year": int(r.year) if r.year else None,
-                "month": int(r.month) if r.month is not None else None,
-                "avg_total_pm25": float(r.avg_total_pm25) if r.avg_total_pm25 is not None else None,
-                "avg_fire_pm25": float(r.avg_fire_pm25) if r.avg_fire_pm25 is not None else None,
-                "avg_nonfire_pm25": float(r.avg_total_pm25 - r.avg_fire_pm25) 
-                    if r.avg_total_pm25 is not None and r.avg_fire_pm25 is not None 
-                    else None,
-            } for r in results
-        ]
+        
+        monthly_results = monthly_query.all()
+        monthly_summaries = []
+        
+        for result in monthly_results:
+            monthly_summaries.append(MonthlyPM25Summary(
+                fips=result.fips,
+                year=int(result.year),
+                month=int(result.month),
+                avg_total=float(result.avg_total),
+                avg_fire=float(result.avg_fire),
+                avg_nonfire=float(result.avg_nonfire),
+                max_total=float(result.max_total),
+                max_fire=float(result.max_fire),
+                days_count=int(result.days_count)
+            ))
+        
+        db.bulk_save_objects(monthly_summaries)
+        
+        # Generate seasonal summaries
+        daily_data = db.query(DailyPM25).all()
+        seasonal_data = {}
+        
+        for record in daily_data:
+            season = get_season_from_date(record.date)
+            year = record.date.year
+            
+            # Adjust year for winter season
+            if season == "winter" and record.date.month in [1, 2, 3]:
+                year = year  # Winter belongs to the ending year
+            elif season == "winter" and record.date.month == 12:
+                year = year + 1  # December belongs to next year's winter
+            
+            key = (record.fips, year, season)
+            
+            if key not in seasonal_data:
+                seasonal_data[key] = {
+                    'total_values': [],
+                    'fire_values': [],
+                    'nonfire_values': []
+                }
+            
+            seasonal_data[key]['total_values'].append(record.total)
+            seasonal_data[key]['fire_values'].append(record.fire)
+            seasonal_data[key]['nonfire_values'].append(record.nonfire)
+        
+        seasonal_summaries = []
+        for (fips, year, season), values in seasonal_data.items():
+            seasonal_summaries.append(SeasonalPM25Summary(
+                fips=fips,
+                year=year,
+                season=season,
+                avg_total=float(np.mean(values['total_values'])),
+                avg_fire=float(np.mean(values['fire_values'])),
+                avg_nonfire=float(np.mean(values['nonfire_values'])),
+                max_total=float(np.max(values['total_values'])),
+                max_fire=float(np.max(values['fire_values'])),
+                days_count=len(values['total_values'])
+            ))
+        
+        db.bulk_save_objects(seasonal_summaries)
+        db.commit()
+        
+        logger.info(f"Preprocessed {len(yearly_summaries)} yearly, {len(monthly_summaries)} monthly, and {len(seasonal_summaries)} seasonal summaries")
+        
+    except Exception as e:
+        logger.error(f"Error in preprocessing: {str(e)}", exc_info=True)
+        db.rollback()
+        raise
 
-    elif period in ["daily", "seasonal", "custom"]:
-        query = query.group_by(
-            extract('year', DailyPM25.date),
-            extract('month', DailyPM25.date),
-            extract('day', DailyPM25.date)
-        ).order_by(
-            extract('year', DailyPM25.date),
-            extract('month', DailyPM25.date),
-            extract('day', DailyPM25.date)
-        )
-        results = query.all()
-        data = [
-            {
-                "year": int(r.year) if r.year else None,
-                "month": int(r.month) if r.month is not None else None,
-                "day": int(r.day) if r.day is not None else None,
-                "avg_total_pm25": float(r.avg_total_pm25) if r.avg_total_pm25 is not None else None,
-                "avg_fire_pm25": float(r.avg_fire_pm25) if r.avg_fire_pm25 is not None else None,
-                "avg_nonfire_pm25": float(r.avg_total_pm25 - r.avg_fire_pm25) 
-                    if r.avg_total_pm25 is not None and r.avg_fire_pm25 is not None 
-                    else None,
-            } for r in results
-        ]
+# API Endpoints
 
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported period")
+@app.post("/api/admin/preprocess")
+async def trigger_preprocessing(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Trigger preprocessing of summary data."""
+    background_tasks.add_task(preprocess_summary_data, db)
+    return {"message": "Preprocessing started in background"}
 
-    return {"period": period, "fips": fips, "data": data}
-
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Load county geometries when the application starts."""
-    load_county_geometries()
-
-@app.get("/api/counties")
-async def get_counties_data(
-    start_date: str = Query(..., description="Start date in YYYY-MM-DD format"),
-    end_date: str = Query(..., description="End date in YYYY-MM-DD format"),
-    time_scale: str = Query("period", description="Time scale: daily, monthly, seasonal, yearly, period"),
+@app.get("/api/counties/choropleth")
+async def get_choropleth_data(
+    time_scale: str = Query("yearly", regex="^(yearly|monthly|seasonal)$"),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None),
+    season: Optional[str] = Query(None),
+    metric: str = Query("avg_total", regex="^(avg_total|avg_fire|avg_nonfire|max_total|max_fire)$"),
     db: Session = Depends(get_db)
 ):
     """
-    Get PM2.5 and population data for all counties within a date range.
-    Returns GeoJSON with properties for PM2.5 and population data.
+    Get preprocessed choropleth data for map visualization.
+    Uses summary tables for better performance.
+    
+    Returns GeoJSON with the following properties:
+    - value: The selected metric value
+    - avg_total: Average total PM2.5
+    - avg_fire: Average fire-related PM2.5
+    - avg_nonfire: Average non-fire PM2.5
+    - max_total: Maximum total PM2.5
+    - max_fire: Maximum fire-related PM2.5
+    - population: Population count if available
+    - county_name: Name of the county
     """
     try:
-        # Parse dates
-        start = parse_flexible_date(start_date)
-        
-        # Adjust end date based on input format
-        if len(end_date) == 4:  # Year only
-            end = datetime(start.year, 12, 31).date()
-        elif len(end_date) == 7:  # Year and month
-            end_month = datetime.strptime(end_date, "%Y-%m").date()
-            next_month = end_month.replace(day=28) + timedelta(days=4)  # Get to next month
-            end = (next_month - timedelta(days=next_month.day)).date()  # Last day of month
-        else:
-            end = parse_flexible_date(end_date)
-
-        # Base query with joins and filters
-        query = db.query(
-            County.fips,
-            County.name.label("county_name"),
-            func.avg(DailyPM25.total).label("avg_total_pm25"),
-            func.avg(DailyPM25.fire).label("fire_pm25"),
-            (func.avg(DailyPM25.total) - func.avg(DailyPM25.fire)).label("nonfire_pm25"),
-            County.geometry,
-            func.avg(Population.population).label("population")
-        ).join(
-            DailyPM25, DailyPM25.fips == County.fips
-        ).outerjoin(
-            Population, and_(
-                Population.fips == County.fips,
-                Population.year == extract('year', DailyPM25.date)
-            )
-        ).filter(
-            # Exclude Puerto Rico
-            ~County.fips.startswith('72'),
-            # Date range filter
-            DailyPM25.date.between(start, end)
-        )
-
-        # Group by based on time scale
         if time_scale == "yearly":
-            query = query.group_by(
-                extract('year', DailyPM25.date),
-                County.fips,
-                County.name,
-                County.geometry
-            ).order_by(
-                extract('year', DailyPM25.date)
+            if not year:
+                raise HTTPException(status_code=400, detail="Year required for yearly data")
+            
+            query = db.query(
+                YearlyPM25Summary.fips,
+                County.name.label("county_name"),
+                County.geometry,
+                YearlyPM25Summary.avg_total,
+                YearlyPM25Summary.avg_fire,
+                YearlyPM25Summary.avg_nonfire,
+                YearlyPM25Summary.max_total,
+                YearlyPM25Summary.max_fire,
+                Population.population
+            ).join(
+                County, County.fips == YearlyPM25Summary.fips
+            ).outerjoin(
+                Population, and_(
+                    Population.fips == YearlyPM25Summary.fips,
+                    Population.year == year
+                )
+            ).filter(
+                YearlyPM25Summary.year == year,
+                ~County.fips.startswith('72')  # Exclude Puerto Rico
             )
+            
         elif time_scale == "monthly":
-            query = query.group_by(
-                extract('year', DailyPM25.date),
-                extract('month', DailyPM25.date),
-                County.fips,
-                County.name,
-                County.geometry
-            ).order_by(
-                extract('year', DailyPM25.date),
-                extract('month', DailyPM25.date)
+            if not year or not month:
+                raise HTTPException(status_code=400, detail="Year and month required for monthly data")
+            
+            query = db.query(
+                MonthlyPM25Summary.fips,
+                County.name.label("county_name"),
+                County.geometry,
+                MonthlyPM25Summary.avg_total,
+                MonthlyPM25Summary.avg_fire,
+                MonthlyPM25Summary.avg_nonfire,
+                MonthlyPM25Summary.max_total,
+                MonthlyPM25Summary.max_fire,
+                Population.population
+            ).join(
+                County, County.fips == MonthlyPM25Summary.fips
+            ).outerjoin(
+                Population, and_(
+                    Population.fips == MonthlyPM25Summary.fips,
+                    Population.year == year
+                )
+            ).filter(
+                MonthlyPM25Summary.year == year,
+                MonthlyPM25Summary.month == month,
+                ~County.fips.startswith('72')
             )
-        else:  # daily, seasonal, period
-            query = query.group_by(
-                DailyPM25.date,
-                County.fips,
-                County.name,
-                County.geometry
-            ).order_by(DailyPM25.date)
-
-        # Execute query
+            
+        elif time_scale == "seasonal":
+            if not year or not season:
+                raise HTTPException(status_code=400, detail="Year and season required for seasonal data")
+            
+            query = db.query(
+                SeasonalPM25Summary.fips,
+                County.name.label("county_name"),
+                County.geometry,
+                SeasonalPM25Summary.avg_total,
+                SeasonalPM25Summary.avg_fire,
+                SeasonalPM25Summary.avg_nonfire,
+                SeasonalPM25Summary.max_total,
+                SeasonalPM25Summary.max_fire,
+                Population.population
+            ).join(
+                County, County.fips == SeasonalPM25Summary.fips
+            ).outerjoin(
+                Population, and_(
+                    Population.fips == SeasonalPM25Summary.fips,
+                    Population.year == year
+                )
+            ).filter(
+                SeasonalPM25Summary.year == year,
+                SeasonalPM25Summary.season == season.lower(),
+                ~County.fips.startswith('72')
+            )
+        
         results = query.all()
-
-        # Process results into GeoJSON
+        
+        # Build GeoJSON features
         features = []
         for row in results:
-            # Skip rows without geometry
             if not row.geometry:
                 continue
                 
+            # Get the metric value
+            metric_value = getattr(row, metric, 0)
+            
+            # Get the metric value, defaulting to 0 if None
+            metric_value = getattr(row, metric, 0)
             feature = {
                 "type": "Feature",
                 "geometry": row.geometry,
                 "properties": {
-                    "FIPS": row.fips,
+                    "fips": row.fips,
                     "county_name": row.county_name,
-                    "avg_total_pm25": float(row.avg_total_pm25) if row.avg_total_pm25 is not None else 0,
-                    "fire_pm25": float(row.fire_pm25) if row.fire_pm25 is not None else 0,
-                    "nonfire_pm25": float(row.nonfire_pm25) if row.nonfire_pm25 is not None else 0,
+                    "value": float(metric_value) if metric_value is not None else 0,
+                    "avg_total": float(row.avg_total) if row.avg_total is not None else 0,
+                    "avg_fire": float(row.avg_fire) if row.avg_fire is not None else 0,
+                    "avg_nonfire": float(row.avg_nonfire) if row.avg_nonfire is not None else 0,
+                    "max_total": float(row.max_total) if row.max_total is not None else 0,
+                    "max_fire": float(row.max_fire) if row.max_fire is not None else 0,
                     "population": int(row.population) if row.population is not None else 0
                 }
             }
             features.append(feature)
-
+        
         return {
             "type": "FeatureCollection",
-            "features": features
+            "features": features,
+            "metadata": {
+                "time_scale": time_scale,
+                "year": year,
+                "month": month,
+                "season": season,
+                "metric": metric,
+                "feature_count": len(features)
+            }
         }
-
+        
     except Exception as e:
-        logger.error(f"Error in get_counties_data: {str(e)}", exc_info=True)
+        logger.error(f"Error in choropleth data: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/pm25/bar_chart/{fips}")
+async def get_bar_chart_data(
+    fips: str,
+    time_scale: str = Query("yearly", regex="^(yearly|monthly|seasonal|daily)$"),
+    start_year: Optional[int] = Query(None),
+    end_year: Optional[int] = Query(None),
+    year: Optional[int] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Get preprocessed bar chart data for a specific county.
+    Uses summary tables when possible for better performance.
+    
+    Returns a list of data points with the following structure:
+    [
+      {
+        "year": int,               # Year of the data point
+        "month": Optional[int],    # Month (1-12) if time_scale is monthly
+        "season": Optional[str],   # Season name if time_scale is seasonal
+        "date": Optional[str],     # ISO date string if time_scale is daily
+        "total": float,           # Total PM2.5 value
+        "fire": float,            # Fire-related PM2.5
+        "nonfire": float          # Non-fire PM2.5
+      },
+      ...
+    ]
+    """
+    try:
+        # Validate county exists
+        county = db.query(County).filter(County.fips == fips).first()
+        if not county:
+            raise HTTPException(status_code=404, detail=f"County with FIPS {fips} not found")
+        
+        if time_scale == "yearly":
+            query = db.query(YearlyPM25Summary).filter(YearlyPM25Summary.fips == fips)
+            
+            if start_year and end_year:
+                query = query.filter(
+                    YearlyPM25Summary.year >= start_year,
+                    YearlyPM25Summary.year <= end_year
+                )
+            elif year:
+                query = query.filter(YearlyPM25Summary.year == year)
+            
+            results = query.order_by(YearlyPM25Summary.year).all()
+            
+            data = [
+                {
+                    "year": r.year,
+                    "total": float(r.avg_total),
+                    "fire": float(r.avg_fire),
+                    "nonfire": float(r.avg_nonfire),
+                    "max_total": float(r.max_total),
+                    "max_fire": float(r.max_fire),
+                    "days_count": r.days_count
+                }
+                for r in results
+            ]
+            
+        elif time_scale == "monthly":
+            if not year:
+                raise HTTPException(status_code=400, detail="Year required for monthly data")
+            
+            results = db.query(MonthlyPM25Summary).filter(
+                MonthlyPM25Summary.fips == fips,
+                MonthlyPM25Summary.year == year
+            ).order_by(MonthlyPM25Summary.month).all()
+            
+            data = [
+                {
+                    "year": r.year,
+                    "month": r.month,
+                    "total": float(r.avg_total),
+                    "fire": float(r.avg_fire),
+                    "nonfire": float(r.avg_nonfire),
+                    "max_total": float(r.max_total),
+                    "max_fire": float(r.max_fire),
+                    "days_count": r.days_count
+                }
+                for r in results
+            ]
+            
+        elif time_scale == "seasonal":
+            query = db.query(SeasonalPM25Summary).filter(SeasonalPM25Summary.fips == fips)
+            
+            if start_year and end_year:
+                query = query.filter(
+                    SeasonalPM25Summary.year >= start_year,
+                    SeasonalPM25Summary.year <= end_year
+                )
+            elif year:
+                query = query.filter(SeasonalPM25Summary.year == year)
+            
+            results = query.order_by(SeasonalPM25Summary.year, SeasonalPM25Summary.season).all()
+            
+            data = [
+                {
+                    "year": r.year,
+                    "season": r.season,
+                    "total": float(r.avg_total),
+                    "fire": float(r.avg_fire),
+                    "nonfire": float(r.avg_nonfire),
+                    "max_total": float(r.max_total),
+                    "max_fire": float(r.max_fire),
+                    "days_count": r.days_count
+                }
+                for r in results
+            ]
+            
+        elif time_scale == "daily":
+            # For daily data, use the original DailyPM25 table
+            if not year:
+                raise HTTPException(status_code=400, detail="Year required for daily data")
+            
+            start_date = date(year, 1, 1)
+            end_date = date(year, 12, 31)
+            
+            results = db.query(DailyPM25).filter(
+                DailyPM25.fips == fips,
+                DailyPM25.date.between(start_date, end_date)
+            ).order_by(DailyPM25.date).all()
+            
+            data = [
+                {
+                    "date": r.date.isoformat(),
+                    "year": r.date.year,
+                    "month": r.date.month,
+                    "day": r.date.day,
+                    "total": float(r.total),
+                    "fire": float(r.fire),
+                    "nonfire": float(r.nonfire)
+                }
+                for r in results
+            ]
+        
+        return data
+        
+    except Exception as e:
+        logger.error(f"Error in bar chart data: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/counties/statistics")
+async def get_county_statistics(
+    time_scale: str = Query("yearly", regex="^(yearly|monthly|seasonal)$"),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None),
+    season: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get statistical summaries across all counties."""
+    try:
+        if time_scale == "yearly":
+            if not year:
+                raise HTTPException(status_code=400, detail="Year required for yearly statistics")
+            
+            stats = db.query(
+                func.avg(YearlyPM25Summary.avg_total).label("mean_total"),
+                func.avg(YearlyPM25Summary.avg_fire).label("mean_fire"),
+                func.avg(YearlyPM25Summary.avg_nonfire).label("mean_nonfire"),
+                func.percentile_cont(0.5).within_group(YearlyPM25Summary.avg_total).label("median_total"),
+                func.percentile_cont(0.5).within_group(YearlyPM25Summary.avg_fire).label("median_fire"),
+                func.min(YearlyPM25Summary.avg_total).label("min_total"),
+                func.max(YearlyPM25Summary.avg_total).label("max_total"),
+                func.count().label("county_count")
+            ).filter(YearlyPM25Summary.year == year).first()
+            
+        elif time_scale == "monthly":
+            if not year or not month:
+                raise HTTPException(status_code=400, detail="Year and month required for monthly statistics")
+            
+            stats = db.query(
+                func.avg(MonthlyPM25Summary.avg_total).label("mean_total"),
+                func.avg(MonthlyPM25Summary.avg_fire).label("mean_fire"),
+                func.avg(MonthlyPM25Summary.avg_nonfire).label("mean_nonfire"),
+                func.percentile_cont(0.5).within_group(MonthlyPM25Summary.avg_total).label("median_total"),
+                func.percentile_cont(0.5).within_group(MonthlyPM25Summary.avg_fire).label("median_fire"),
+                func.min(MonthlyPM25Summary.avg_total).label("min_total"),
+                func.max(MonthlyPM25Summary.avg_total).label("max_total"),
+                func.count().label("county_count")
+            ).filter(
+                MonthlyPM25Summary.year == year,
+                MonthlyPM25Summary.month == month
+            ).first()
+            
+        elif time_scale == "seasonal":
+            if not year or not season:
+                raise HTTPException(status_code=400, detail="Year and season required for seasonal statistics")
+            
+            stats = db.query(
+                func.avg(SeasonalPM25Summary.avg_total).label("mean_total"),
+                func.avg(SeasonalPM25Summary.avg_fire).label("mean_fire"),
+                func.avg(SeasonalPM25Summary.avg_nonfire).label("mean_nonfire"),
+                func.percentile_cont(0.5).within_group(SeasonalPM25Summary.avg_total).label("median_total"),
+                func.percentile_cont(0.5).within_group(SeasonalPM25Summary.avg_fire).label("median_fire"),
+                func.min(SeasonalPM25Summary.avg_total).label("min_total"),
+                func.max(SeasonalPM25Summary.avg_total).label("max_total"),
+                func.count().label("county_count")
+            ).filter(
+                SeasonalPM25Summary.year == year,
+                SeasonalPM25Summary.season == season.lower()
+            ).first()
+        
+        return {
+            "time_scale": time_scale,
+            "year": year,
+            "month": month,
+            "season": season,
+            "statistics": {
+                "mean_total_pm25": float(stats.mean_total) if stats.mean_total else 0,
+                "mean_fire_pm25": float(stats.mean_fire) if stats.mean_fire else 0,
+                "mean_nonfire_pm25": float(stats.mean_nonfire) if stats.mean_nonfire else 0,
+                "median_total_pm25": float(stats.median_total) if stats.median_total else 0,
+                "median_fire_pm25": float(stats.median_fire) if stats.median_fire else 0,
+                "min_total_pm25": float(stats.min_total) if stats.min_total else 0,
+                "max_total_pm25": float(stats.max_total) if stats.max_total else 0,
+                "county_count": int(stats.county_count) if stats.county_count else 0
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in statistics: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Health check endpoint
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok"}
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
