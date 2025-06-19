@@ -13,7 +13,8 @@ from typing import Optional
 # Import your models and database
 from .models import (
     Base, County, DailyPM25, Population, Demographics,
-    YearlyPM25Summary, MonthlyPM25Summary, SeasonalPM25Summary
+    YearlyPM25Summary, MonthlyPM25Summary, SeasonalPM25Summary,
+    AnnualHealthMetric, BaselineMortalityRate
 )
 from .database import engine, SessionLocal
 
@@ -385,10 +386,56 @@ class DataLoader:
             except Exception as e:
                 logger.warning(f"Index creation failed (may already exist): {e}")
 
+    def load_baseline_mortality(self, filepath: Optional[str] = None):
+        """Load baseline mortality rates from all_basemor_results.csv"""
+        if filepath is None:
+            filepath = self.data_dir / "all_basemor_results.csv"
+        logger.info(f"Loading baseline mortality rates from {filepath}")
+
+        try:
+            df = pd.read_csv(filepath)
+            # Clean column names
+            df.columns = df.columns.str.strip().str.replace('"', '')
+
+            # Build county index -> FIPS mapping
+            county_mapping = {c.index: c.fips for c in self.db.query(County.index, County.fips).all()}
+
+            records = []
+            for _, row in df.iterrows():
+                county_index = int(row['county'])
+                fips = county_mapping.get(county_index)
+                if not fips:
+                    logger.warning(f"County index {county_index} not found in counties table, skipping.")
+                    continue
+                record = BaselineMortalityRate(
+                    fips=fips,
+                    county_index=county_index,
+                    year=int(row['year']),
+                    age_group=int(row['age_group']),
+                    stat_type=str(row['stat']),
+                    value=float(row['value']),
+                    source=str(row['source']),
+                    allage_flag="allage" in str(row['source']).lower()
+                )
+                records.append(record)
+                if len(records) >= 1000:
+                    self.db.bulk_save_objects(records)
+                    self.db.commit()
+                    logger.info(f"Inserted {len(records)} baseline mortality records...")
+                    records = []
+            if records:
+                self.db.bulk_save_objects(records)
+                self.db.commit()
+                logger.info(f"Inserted final {len(records)} baseline mortality records.")
+            logger.info("Baseline mortality loading complete.")
+        except Exception as e:
+            logger.error(f"Error loading baseline mortality rates: {e}")
+            self.db.rollback()
+            raise
+
     def preprocess_aggregations(self):
-        """Generate pre-aggregated tables for fast queries"""
+        """Generate pre-aggregated tables for fast queries, including population-weighted metrics"""
         logger.info("Starting aggregation preprocessing...")
-        
         try:
             # Clear existing aggregations
             logger.info("Clearing existing aggregations...")
@@ -396,11 +443,16 @@ class DataLoader:
             self.db.query(MonthlyPM25Summary).delete()
             self.db.query(SeasonalPM25Summary).delete()
             self.db.commit()
-            
+
+            # Preload population data for all counties/years
+            logger.info("Preloading population data for all counties/years...")
+            pop_lookup = {}
+            for pop in self.db.query(Population).all():
+                pop_lookup[(pop.fips, pop.year)] = pop.population
+
             # YEARLY AGGREGATIONS
             logger.info("Processing yearly aggregations...")
-            yearly_query = text("""
-                INSERT INTO yearly_pm25_summary (fips, year, avg_total, avg_fire, avg_nonfire, max_total, max_fire, days_count)
+            yearly_results = self.db.execute(text("""
                 SELECT 
                     fips,
                     EXTRACT(year FROM date) as year,
@@ -409,17 +461,39 @@ class DataLoader:
                     AVG(nonfire) as avg_nonfire,
                     MAX(total) as max_total,
                     MAX(fire) as max_fire,
+                    MAX(nonfire) as max_nonfire,
                     COUNT(*) as days_count
                 FROM daily_pm25
                 GROUP BY fips, EXTRACT(year FROM date)
-            """)
-            self.db.execute(yearly_query)
+            """)).fetchall()
+            yearly_summaries = []
+            for row in yearly_results:
+                fips = row.fips
+                year = int(row.year)
+                population = pop_lookup.get((fips, year), 0)
+                pop_weighted_total = (row.avg_total or 0) * population if population else 0
+                pop_weighted_fire = (row.avg_fire or 0) * population if population else 0
+                pop_weighted_nonfire = (row.avg_nonfire or 0) * population if population else 0
+                yearly_summaries.append(YearlyPM25Summary(
+                    fips=fips,
+                    year=year,
+                    avg_total=row.avg_total,
+                    avg_fire=row.avg_fire,
+                    avg_nonfire=row.avg_nonfire,
+                    max_total=row.max_total,
+                    max_fire=row.max_fire,
+                    max_nonfire=row.max_nonfire,
+                    days_count=row.days_count,
+                    pop_weighted_total=pop_weighted_total,
+                    pop_weighted_fire=pop_weighted_fire,
+                    pop_weighted_nonfire=pop_weighted_nonfire
+                ))
+            self.db.bulk_save_objects(yearly_summaries)
             self.db.commit()
-            
+
             # MONTHLY AGGREGATIONS
             logger.info("Processing monthly aggregations...")
-            monthly_query = text("""
-                INSERT INTO monthly_pm25_summary (fips, year, month, avg_total, avg_fire, avg_nonfire, max_total, max_fire, days_count)
+            monthly_results = self.db.execute(text("""
                 SELECT 
                     fips,
                     EXTRACT(year FROM date) as year,
@@ -429,17 +503,41 @@ class DataLoader:
                     AVG(nonfire) as avg_nonfire,
                     MAX(total) as max_total,
                     MAX(fire) as max_fire,
+                    MAX(nonfire) as max_nonfire,
                     COUNT(*) as days_count
                 FROM daily_pm25
                 GROUP BY fips, EXTRACT(year FROM date), EXTRACT(month FROM date)
-            """)
-            self.db.execute(monthly_query)
+            """)).fetchall()
+            monthly_summaries = []
+            for row in monthly_results:
+                fips = row.fips
+                year = int(row.year)
+                month = int(row.month)
+                population = pop_lookup.get((fips, year), 0)
+                pop_weighted_total = (row.avg_total or 0) * population if population else 0
+                pop_weighted_fire = (row.avg_fire or 0) * population if population else 0
+                pop_weighted_nonfire = (row.avg_nonfire or 0) * population if population else 0
+                monthly_summaries.append(MonthlyPM25Summary(
+                    fips=fips,
+                    year=year,
+                    month=month,
+                    avg_total=row.avg_total,
+                    avg_fire=row.avg_fire,
+                    avg_nonfire=row.avg_nonfire,
+                    max_total=row.max_total,
+                    max_fire=row.max_fire,
+                    max_nonfire=row.max_nonfire,
+                    days_count=row.days_count,
+                    pop_weighted_total=pop_weighted_total,
+                    pop_weighted_fire=pop_weighted_fire,
+                    pop_weighted_nonfire=pop_weighted_nonfire
+                ))
+            self.db.bulk_save_objects(monthly_summaries)
             self.db.commit()
-            
+
             # SEASONAL AGGREGATIONS
             logger.info("Processing seasonal aggregations...")
-            seasonal_query = text("""
-                INSERT INTO seasonal_pm25_summary (fips, year, season, avg_total, avg_fire, avg_nonfire, max_total, max_fire, days_count)
+            seasonal_results = self.db.execute(text("""
                 SELECT 
                     fips,
                     EXTRACT(year FROM date) as year,
@@ -454,6 +552,7 @@ class DataLoader:
                     AVG(nonfire) as avg_nonfire,
                     MAX(total) as max_total,
                     MAX(fire) as max_fire,
+                    MAX(nonfire) as max_nonfire,
                     COUNT(*) as days_count
                 FROM daily_pm25
                 GROUP BY fips, EXTRACT(year FROM date), 
@@ -463,12 +562,35 @@ class DataLoader:
                         WHEN EXTRACT(month FROM date) IN (6, 7, 8) THEN 'summer'
                         ELSE 'fall'
                     END
-            """)
-            self.db.execute(seasonal_query)
+            """)).fetchall()
+            seasonal_summaries = []
+            for row in seasonal_results:
+                fips = row.fips
+                year = int(row.year)
+                season = row.season
+                population = pop_lookup.get((fips, year), 0)
+                pop_weighted_total = (row.avg_total or 0) * population if population else 0
+                pop_weighted_fire = (row.avg_fire or 0) * population if population else 0
+                pop_weighted_nonfire = (row.avg_nonfire or 0) * population if population else 0
+                seasonal_summaries.append(SeasonalPM25Summary(
+                    fips=fips,
+                    year=year,
+                    season=season,
+                    avg_total=row.avg_total,
+                    avg_fire=row.avg_fire,
+                    avg_nonfire=row.avg_nonfire,
+                    max_total=row.max_total,
+                    max_fire=row.max_fire,
+                    max_nonfire=row.max_nonfire,
+                    days_count=row.days_count,
+                    pop_weighted_total=pop_weighted_total,
+                    pop_weighted_fire=pop_weighted_fire,
+                    pop_weighted_nonfire=pop_weighted_nonfire
+                ))
+            self.db.bulk_save_objects(seasonal_summaries)
             self.db.commit()
-            
+
             logger.info("All aggregations processed successfully!")
-            
         except Exception as e:
             logger.error(f"Error during aggregation preprocessing: {e}")
             self.db.rollback()

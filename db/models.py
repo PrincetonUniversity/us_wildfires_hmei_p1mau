@@ -1,5 +1,5 @@
 from datetime import date
-from sqlalchemy import Column, Integer, Float, String, Date, ForeignKey, UniqueConstraint, extract, func, Index
+from sqlalchemy import Column, Integer, Float, String, Boolean, Date, ForeignKey, UniqueConstraint, extract, func, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, column_property
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -19,6 +19,7 @@ class County(Base):
     yearly_summaries = relationship("YearlyPM25Summary", back_populates="county")
     monthly_summaries = relationship("MonthlyPM25Summary", back_populates="county")
     seasonal_summaries = relationship("SeasonalPM25Summary", back_populates="county")
+    baseline_mortality_rates = relationship("BaselineMortalityRate", back_populates="county")
 
 class DailyPM25(Base):
     __tablename__ = "daily_pm25"
@@ -31,7 +32,6 @@ class DailyPM25(Base):
     fire = Column(Float, nullable=False)    # Fire-related PM2.5
     nonfire = Column(Float, nullable=False)  # Non-fire PM2.5
     
-    # Fixed: Only one __table_args__ definition
     __table_args__ = (
         UniqueConstraint("fips", "date", name="_fips_date_uc"),
     )
@@ -103,7 +103,7 @@ class Demographics(Base):
 class YearlyPM25Summary(Base):
     __tablename__ = "yearly_pm25_summary"
     
-    fips = Column(String, ForeignKey("counties.fips"), primary_key=True)  # Fixed: Added ForeignKey
+    fips = Column(String, ForeignKey("counties.fips"), primary_key=True)
     year = Column(Integer, primary_key=True)
     
     # Aggregated values
@@ -113,16 +113,21 @@ class YearlyPM25Summary(Base):
     
     max_total = Column(Float, nullable=False)
     max_fire = Column(Float, nullable=False)
+    max_nonfire = Column(Float, nullable=False)
     
     # Metadata
     days_count = Column(Integer, nullable=False)  # for data quality checks
     
-    county = relationship("County", back_populates="yearly_summaries")  # Fixed: Added back_populates
+    pop_weighted_total = Column(Float, nullable=True)
+    pop_weighted_fire = Column(Float, nullable=True)
+    pop_weighted_nonfire = Column(Float, nullable=True)
+    
+    county = relationship("County", back_populates="yearly_summaries")
 
 class MonthlyPM25Summary(Base):
     __tablename__ = "monthly_pm25_summary"
     
-    fips = Column(String, ForeignKey("counties.fips"), primary_key=True)  # Fixed: Added ForeignKey
+    fips = Column(String, ForeignKey("counties.fips"), primary_key=True)
     year = Column(Integer, primary_key=True)
     month = Column(Integer, primary_key=True)
     
@@ -132,15 +137,20 @@ class MonthlyPM25Summary(Base):
     
     max_total = Column(Float, nullable=False)
     max_fire = Column(Float, nullable=False)
-    
+    max_nonfire = Column(Float, nullable=False)
+
     days_count = Column(Integer, nullable=False)
     
-    county = relationship("County", back_populates="monthly_summaries")  # Fixed: Added back_populates
+    pop_weighted_total = Column(Float, nullable=True)
+    pop_weighted_fire = Column(Float, nullable=True)
+    pop_weighted_nonfire = Column(Float, nullable=True)
+    
+    county = relationship("County", back_populates="monthly_summaries")
 
 class SeasonalPM25Summary(Base):
     __tablename__ = "seasonal_pm25_summary"
     
-    fips = Column(String, ForeignKey("counties.fips"), primary_key=True)  # Fixed: Added ForeignKey
+    fips = Column(String, ForeignKey("counties.fips"), primary_key=True)
     year = Column(Integer, primary_key=True)
     season = Column(String, primary_key=True)  # 'spring', 'summer', 'fall', 'winter'
     
@@ -150,10 +160,42 @@ class SeasonalPM25Summary(Base):
     
     max_total = Column(Float, nullable=False)
     max_fire = Column(Float, nullable=False)
-    
+    max_nonfire = Column(Float, nullable=False)
+
     days_count = Column(Integer, nullable=False)
     
-    county = relationship("County", back_populates="seasonal_summaries")  # Fixed: Added back_populates
+    pop_weighted_total = Column(Float, nullable=True)
+    pop_weighted_fire = Column(Float, nullable=True)
+    pop_weighted_nonfire = Column(Float, nullable=True)
+    
+    county = relationship("County", back_populates="seasonal_summaries")
+
+class AnnualHealthMetric(Base):
+    __tablename__ = "annual_health_metric"
+    id = Column(Integer, primary_key=True)
+    fips = Column(String, ForeignKey("counties.fips"), index=True)
+    year = Column(Integer, index=True)
+    metric_name = Column(String)
+    value = Column(Float)
+    county = relationship("County")
+    __table_args__ = (UniqueConstraint("fips", "year", "metric_name", name="_fips_year_metric_uc"),)
+
+class BaselineMortalityRate(Base):
+    __tablename__ = "baseline_mortality_rate"
+    id = Column(Integer, primary_key=True)
+    fips = Column(String, ForeignKey("counties.fips"), index=True)
+    county_index = Column(Integer, index=True)
+    year = Column(Integer, index=True)
+    age_group = Column(Integer)
+    stat_type = Column(String)  # 'mean', 'upper', 'lower'
+    value = Column(Float)
+    source = Column(String)
+    allage_flag = Column(Boolean)
+    county = relationship("County", back_populates="baseline_mortality_rates")
+    __table_args__ = (
+        UniqueConstraint("fips", "year", "age_group", "stat_type", "source", name="_unique_mortality_entry"),
+    )
+    
 
 # Add indexes for fast queries
 # Run after creating tables:

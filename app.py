@@ -1,22 +1,19 @@
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional
 import os
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, Depends, status, Request, Response, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, Depends, status, Request, Response, BackgroundTasks, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import func, and_, or_, extract, select, text
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from sqlalchemy.orm import Session, selectinload
-from sqlalchemy.sql.expression import case
-from functools import lru_cache
-import asyncio
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 from concurrent.futures import ThreadPoolExecutor
 
 # Application imports
@@ -27,7 +24,7 @@ from db.models import (
 )
 
 import geopandas as gpd
-from shapely.geometry import mapping, shape
+from shapely.geometry import mapping
 import warnings
 
 # Suppress warnings from GeoPandas
@@ -333,156 +330,247 @@ async def trigger_preprocessing(
     background_tasks.add_task(preprocess_summary_data, db)
     return {"message": "Preprocessing started in background"}
 
-@app.get("/api/counties/choropleth")
-async def get_choropleth_data(
+# --- Helper Functions for Choropleth Endpoints ---
+def build_choropleth_query(db, time_scale, year, month, season, summary_model):
+    if time_scale == "yearly":
+        if not year:
+            raise HTTPException(status_code=400, detail="Year required for yearly data")
+        query = db.query(
+            summary_model.fips,
+            County.name.label("county_name"),
+            County.geometry,
+            summary_model.avg_total,
+            summary_model.avg_fire,
+            summary_model.avg_nonfire,
+            summary_model.max_total,
+            summary_model.max_fire,
+            summary_model.max_nonfire,
+            summary_model.pop_weighted_total,
+            summary_model.pop_weighted_fire,
+            summary_model.pop_weighted_nonfire,
+            Population.population
+        ).join(
+            County, County.fips == summary_model.fips
+        ).outerjoin(
+            Population, and_(
+                Population.fips == summary_model.fips,
+                Population.year == year
+            )
+        ).filter(
+            summary_model.year == year,
+            ~County.fips.startswith('72')
+        )
+    elif time_scale == "monthly":
+        if not year or not month:
+            raise HTTPException(status_code=400, detail="Year and month required for monthly data")
+        query = db.query(
+            summary_model.fips,
+            County.name.label("county_name"),
+            County.geometry,
+            summary_model.avg_total,
+            summary_model.avg_fire,
+            summary_model.avg_nonfire,
+            summary_model.max_total,
+            summary_model.max_fire,
+            summary_model.max_nonfire,
+            summary_model.pop_weighted_total,
+            summary_model.pop_weighted_fire,
+            summary_model.pop_weighted_nonfire,
+            Population.population
+        ).join(
+            County, County.fips == summary_model.fips
+        ).outerjoin(
+            Population, and_(
+                Population.fips == summary_model.fips,
+                Population.year == year
+            )
+        ).filter(
+            summary_model.year == year,
+            summary_model.month == month,
+            ~County.fips.startswith('72')
+        )
+    elif time_scale == "seasonal":
+        if not year or not season:
+            raise HTTPException(status_code=400, detail="Year and season required for seasonal data")
+        query = db.query(
+            summary_model.fips,
+            County.name.label("county_name"),
+            County.geometry,
+            summary_model.avg_total,
+            summary_model.avg_fire,
+            summary_model.avg_nonfire,
+            summary_model.max_total,
+            summary_model.max_fire,
+            summary_model.max_nonfire,
+            summary_model.pop_weighted_total,
+            summary_model.pop_weighted_fire,
+            summary_model.pop_weighted_nonfire,
+            Population.population
+        ).join(
+            County, County.fips == summary_model.fips
+        ).outerjoin(
+            Population, and_(
+                Population.fips == summary_model.fips,
+                Population.year == year
+            )
+        ).filter(
+            summary_model.year == year,
+            summary_model.season == season.lower(),
+            ~County.fips.startswith('72')
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Invalid time_scale")
+    return query
+
+def build_geojson_features(results, value_func):
+    features = []
+    for row in results:
+        if not row.geometry:
+            continue
+        feature = {
+            "type": "Feature",
+            "geometry": row.geometry,
+            "properties": {
+                "fips": row.fips,
+                "county_name": row.county_name,
+                "value": float(value_func(row)),
+                "avg_total": float(row.avg_total) if row.avg_total is not None else 0,
+                "avg_fire": float(row.avg_fire) if row.avg_fire is not None else 0,
+                "avg_nonfire": float(row.avg_nonfire) if row.avg_nonfire is not None else 0,
+                "max_total": float(row.max_total) if row.max_total is not None else 0,
+                "max_fire": float(row.max_fire) if row.max_fire is not None else 0,
+                "max_nonfire": float(row.max_nonfire) if row.max_nonfire is not None else 0,
+                "pop_weighted_total": float(row.pop_weighted_total) if row.pop_weighted_total is not None else 0,
+                "pop_weighted_fire": float(row.pop_weighted_fire) if row.pop_weighted_fire is not None else 0,
+                "pop_weighted_nonfire": float(row.pop_weighted_nonfire) if row.pop_weighted_nonfire is not None else 0,
+                "population": int(row.population) if row.population is not None else 0
+            }
+        }
+        features.append(feature)
+    return features
+
+# --- New Modular Endpoints ---
+choropleth_router = APIRouter(prefix="/api/counties/choropleth", tags=["Choropleth"])
+
+@choropleth_router.get("/average")
+async def get_choropleth_average(
     time_scale: str = Query("yearly", pattern="^(yearly|monthly|seasonal)$"),
     year: Optional[int] = Query(None),
     month: Optional[int] = Query(None),
     season: Optional[str] = Query(None),
-    metric: str = Query("avg_total", pattern="^(avg_total|avg_fire|avg_nonfire|max_total|max_fire)$"),
+    sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$"),
     db: Session = Depends(get_db)
 ):
-    """
-    Get preprocessed choropleth data for map visualization.
-    Uses summary tables for better performance.
-    
-    Returns GeoJSON with the following properties:
-    - value: The selected metric value
-    - avg_total: Average total PM2.5
-    - avg_fire: Average fire-related PM2.5
-    - avg_nonfire: Average non-fire PM2.5
-    - max_total: Maximum total PM2.5
-    - max_fire: Maximum fire-related PM2.5
-    - population: Population count if available
-    - county_name: Name of the county
-    """
-    try:
-        if time_scale == "yearly":
-            if not year:
-                raise HTTPException(status_code=400, detail="Year required for yearly data")
-            
-            query = db.query(
-                YearlyPM25Summary.fips,
-                County.name.label("county_name"),
-                County.geometry,
-                YearlyPM25Summary.avg_total,
-                YearlyPM25Summary.avg_fire,
-                YearlyPM25Summary.avg_nonfire,
-                YearlyPM25Summary.max_total,
-                YearlyPM25Summary.max_fire,
-                Population.population
-            ).join(
-                County, County.fips == YearlyPM25Summary.fips
-            ).outerjoin(
-                Population, and_(
-                    Population.fips == YearlyPM25Summary.fips,
-                    Population.year == year
-                )
-            ).filter(
-                YearlyPM25Summary.year == year,
-                ~County.fips.startswith('72')  # Exclude Puerto Rico
-            )
-            
-        elif time_scale == "monthly":
-            if not year or not month:
-                raise HTTPException(status_code=400, detail="Year and month required for monthly data")
-            
-            query = db.query(
-                MonthlyPM25Summary.fips,
-                County.name.label("county_name"),
-                County.geometry,
-                MonthlyPM25Summary.avg_total,
-                MonthlyPM25Summary.avg_fire,
-                MonthlyPM25Summary.avg_nonfire,
-                MonthlyPM25Summary.max_total,
-                MonthlyPM25Summary.max_fire,
-                Population.population
-            ).join(
-                County, County.fips == MonthlyPM25Summary.fips
-            ).outerjoin(
-                Population, and_(
-                    Population.fips == MonthlyPM25Summary.fips,
-                    Population.year == year
-                )
-            ).filter(
-                MonthlyPM25Summary.year == year,
-                MonthlyPM25Summary.month == month,
-                ~County.fips.startswith('72')
-            )
-            
-        elif time_scale == "seasonal":
-            if not year or not season:
-                raise HTTPException(status_code=400, detail="Year and season required for seasonal data")
-            
-            query = db.query(
-                SeasonalPM25Summary.fips,
-                County.name.label("county_name"),
-                County.geometry,
-                SeasonalPM25Summary.avg_total,
-                SeasonalPM25Summary.avg_fire,
-                SeasonalPM25Summary.avg_nonfire,
-                SeasonalPM25Summary.max_total,
-                SeasonalPM25Summary.max_fire,
-                Population.population
-            ).join(
-                County, County.fips == SeasonalPM25Summary.fips
-            ).outerjoin(
-                Population, and_(
-                    Population.fips == SeasonalPM25Summary.fips,
-                    Population.year == year
-                )
-            ).filter(
-                SeasonalPM25Summary.year == year,
-                SeasonalPM25Summary.season == season.lower(),
-                ~County.fips.startswith('72')
-            )
-        
-        results = query.all()
-        
-        # Build GeoJSON features
-        features = []
-        for row in results:
-            if not row.geometry:
-                continue
-                
-            # Get the metric value
-            metric_value = getattr(row, metric, 0)
-            
-            # Get the metric value, defaulting to 0 if None
-            metric_value = getattr(row, metric, 0)
-            feature = {
-                "type": "Feature",
-                "geometry": row.geometry,
-                "properties": {
-                    "fips": row.fips,
-                    "county_name": row.county_name,
-                    "value": float(metric_value) if metric_value is not None else 0,
-                    "avg_total": float(row.avg_total) if row.avg_total is not None else 0,
-                    "avg_fire": float(row.avg_fire) if row.avg_fire is not None else 0,
-                    "avg_nonfire": float(row.avg_nonfire) if row.avg_nonfire is not None else 0,
-                    "max_total": float(row.max_total) if row.max_total is not None else 0,
-                    "max_fire": float(row.max_fire) if row.max_fire is not None else 0,
-                    "population": int(row.population) if row.population is not None else 0
-                }
-            }
-            features.append(feature)
-        
-        return {
-            "type": "FeatureCollection",
-            "features": features,
-            "metadata": {
-                "time_scale": time_scale,
-                "year": year,
-                "month": month,
-                "season": season,
-                "metric": metric,
-                "feature_count": len(features)
-            }
+    """Get average PM2.5 choropleth data."""
+    summary_model = {
+        "yearly": YearlyPM25Summary,
+        "monthly": MonthlyPM25Summary,
+        "seasonal": SeasonalPM25Summary
+    }[time_scale]
+    query = build_choropleth_query(db, time_scale, year, month, season, summary_model)
+    results = query.all()
+    col_map = {
+        "total": "avg_total",
+        "fire": "avg_fire",
+        "nonfire": "avg_nonfire"
+    }
+    col_name = col_map.get(sub_metric, "avg_total")
+    def value_func(row):
+        return float(getattr(row, col_name) or 0)
+    features = build_geojson_features(results, value_func)
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "metadata": {
+            "time_scale": time_scale,
+            "year": year,
+            "month": month,
+            "season": season,
+            "metric": col_name,
+            "feature_count": len(features)
         }
-        
-    except Exception as e:
-        logger.error(f"Error in choropleth data: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    }
+
+@choropleth_router.get("/max")
+async def get_choropleth_max(
+    time_scale: str = Query("yearly", pattern="^(yearly|monthly|seasonal)$"),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None),
+    season: Optional[str] = Query(None),
+    sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$"),
+    db: Session = Depends(get_db)
+):
+    """Get max PM2.5 choropleth data."""
+    summary_model = {
+        "yearly": YearlyPM25Summary,
+        "monthly": MonthlyPM25Summary,
+        "seasonal": SeasonalPM25Summary
+    }[time_scale]
+    query = build_choropleth_query(db, time_scale, year, month, season, summary_model)
+    results = query.all()
+    col_map = {
+        "total": "max_total",
+        "fire": "max_fire",
+        "nonfire": "max_nonfire"
+    }
+    col_name = col_map.get(sub_metric, "max_total")
+    def value_func(row):
+        return float(getattr(row, col_name) or 0)
+    features = build_geojson_features(results, value_func)
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "metadata": {
+            "time_scale": time_scale,
+            "year": year,
+            "month": month,
+            "season": season,
+            "metric": col_name,
+            "feature_count": len(features)
+        }
+    }
+
+@choropleth_router.get("/pop_weighted")
+async def get_choropleth_pop_weighted(
+    time_scale: str = Query("yearly", pattern="^(yearly|monthly|seasonal)$"),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None),
+    season: Optional[str] = Query(None),
+    sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$"),
+    db: Session = Depends(get_db)
+):
+    """Get population-weighted PM2.5 choropleth data."""
+    summary_model = {
+        "yearly": YearlyPM25Summary,
+        "monthly": MonthlyPM25Summary,
+        "seasonal": SeasonalPM25Summary
+    }[time_scale]
+    query = build_choropleth_query(db, time_scale, year, month, season, summary_model)
+    results = query.all()
+    col_map = {
+        "total": "pop_weighted_total",
+        "fire": "pop_weighted_fire",
+        "nonfire": "pop_weighted_nonfire"
+    }
+    col_name = col_map.get(sub_metric, "pop_weighted_total")
+    def value_func(row):
+        return float(getattr(row, col_name) or 0)
+    features = build_geojson_features(results, value_func)
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "metadata": {
+            "time_scale": time_scale,
+            "year": year,
+            "month": month,
+            "season": season,
+            "metric": col_name,
+            "feature_count": len(features)
+        }
+    }
+
+# Register the router
+app.include_router(choropleth_router)
 
 @app.get("/api/pm25/bar_chart/{fips}")
 async def get_bar_chart_data(
