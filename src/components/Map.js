@@ -32,6 +32,16 @@ const POPULATION_COLORS = [
   [1000000, '#2171b5'] // dark blue
 ];
 
+// Color scale for population-weighted PM2.5 values (purple to blue)
+const POP_WEIGHTED_COLORS = [
+  [0, '#f7f4f9'],      // very light purple
+  [1000000, '#e7e1ef'], // light purple
+  [5000000, '#d4b9da'], // purple
+  [10000000, '#c994c7'], // medium purple
+  [25000000, '#df65b0'], // pink
+  [50000000, '#e7298a']  // dark pink
+];
+
 // State FIPS to abbreviation mapping
 const STATE_FIPS_TO_ABBR = {
   '01': 'AL', '02': 'AK', '04': 'AZ', '05': 'AR', '06': 'CA', '08': 'CO', '09': 'CT', '10': 'DE',
@@ -60,17 +70,22 @@ const getSeasonFromMonth = (month) => {
 // Helper function to calculate dynamic color scale based on data
 const calculateDynamicColorScale = (data, metric) => {
   if (!data || !data.features || data.features.length === 0) {
-    return //getColorScale(); // fallback to static scale
+    // fallback to static scale for the metric
+    if (metric.includes('pop_weighted')) return POP_WEIGHTED_COLORS;
+    if (metric.includes('fire') && !metric.includes('nonfire')) return PM25_COLORS_FIRE;
+    return PM25_COLORS_TOTAL;
   }
 
   // Extract all values for the current metric
   const values = data.features
-    .map(feature => feature.properties.value || 0)
+    .map(feature => feature.properties[metric] || 0)
     .filter(val => val > 0) // Remove zero values
     .sort((a, b) => a - b);
 
   if (values.length === 0) {
-    return //getColorScale(); // fallback to static scale
+    if (metric.includes('pop_weighted')) return POP_WEIGHTED_COLORS;
+    if (metric.includes('fire') && !metric.includes('nonfire')) return PM25_COLORS_FIRE;
+    return PM25_COLORS_TOTAL;
   }
 
   const min = values[0];
@@ -91,7 +106,7 @@ const Map = ({ mapboxToken, stateAbbr }) => {
   const map = useRef(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeMetric, setActiveMetric] = useState('avg_total'); // 'avg_total', 'avg_fire', 'avg_nonfire', 'max_total', 'max_fire'
+  const [activeMetric, setActiveMetric] = useState('average'); // default to 'average'
   const [timeScale, setTimeScale] = useState('yearly');
   const [year, setYear] = useState(2023);
   const [month, setMonth] = useState(1); // 1-12
@@ -99,6 +114,7 @@ const Map = ({ mapboxToken, stateAbbr }) => {
   const [pendingUpdate, setPendingUpdate] = useState(false);
   const [choroplethData, setChoroplethData] = useState(null);
   const currentCountyRef = useRef(null);
+  const [subMetric, setSubMetric] = useState('total'); // default to 'total'
 
   // Function to update the legend based on the current metric and data
   const updateLegend = () => {
@@ -107,7 +123,7 @@ const Map = ({ mapboxToken, stateAbbr }) => {
     const legend = document.getElementById('legend');
     if (!legend) return;
 
-    const colorScale = getColorScale(choroplethData);
+    const colorScale = getColorScale(choroplethData) || [];
     const metricLabel = getMetricLabel(activeMetric);
 
     // Clear existing legend
@@ -147,26 +163,44 @@ const Map = ({ mapboxToken, stateAbbr }) => {
     legend.appendChild(labels);
   };
 
+  // Helper to get the property name for the current metric and sub-metric
+  const getMetricProperty = () => {
+    if (activeMetric === 'average') {
+      if (subMetric === 'total') return 'avg_total';
+      if (subMetric === 'fire') return 'avg_fire';
+      if (subMetric === 'nonfire') return 'avg_nonfire';
+    } else if (activeMetric === 'max') {
+      if (subMetric === 'total') return 'max_total';
+      if (subMetric === 'fire') return 'max_fire';
+      if (subMetric === 'nonfire') return 'max_nonfire';
+    } else if (activeMetric === 'pop_weighted') {
+      if (subMetric === 'total') return 'pop_weighted_total';
+      if (subMetric === 'fire') return 'pop_weighted_fire';
+      if (subMetric === 'nonfire') return 'pop_weighted_nonfire';
+    }
+    return 'avg_total';
+  };
+
   // Function to fetch choropleth data with new API
   const fetchChoroplethData = async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
         time_scale: timeScale,
-        metric: activeMetric,
         ...(year && { year: year.toString() }),
         ...(timeScale === 'monthly' && month && { month: month.toString() }),
         ...(timeScale === 'seasonal' && season && { season }),
+        sub_metric: subMetric // Always send sub_metric
       });
-
-      console.log('Fetching choropleth data with params:', params.toString());
-      const response = await fetch(`http://localhost:8000/api/counties/choropleth?${params}`);
+      let endpoint = '/api/counties/choropleth/average';
+      if (activeMetric === 'max') endpoint = '/api/counties/choropleth/max';
+      if (activeMetric === 'pop_weighted') endpoint = '/api/counties/choropleth/pop_weighted';
+      const response = await fetch(`http://localhost:8000${endpoint}?${params}`);
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Failed to fetch choropleth data: ${response.status} ${response.statusText}\n${errorText}`);
       }
       const data = await response.json();
-
       setChoroplethData(data);
       return data;
     } catch (err) {
@@ -488,13 +522,18 @@ const Map = ({ mapboxToken, stateAbbr }) => {
 
         // Add source and layer
         if (map.current) {
-          map.current.addSource('pm25', {
-            type: 'geojson',
-            data: data,
-            generateId: true
-          });
+          if (!map.current.getSource('pm25')) {
+            map.current.addSource('pm25', {
+              type: 'geojson',
+              data: data,
+              generateId: true
+            });
+          } else {
+            map.current.getSource('pm25').setData(data);
+          }
 
           // Add the fill layer for PM2.5
+          const metricForColor = getMetricProperty();
           map.current.addLayer({
             id: 'pm25-layer',
             type: 'fill',
@@ -503,7 +542,7 @@ const Map = ({ mapboxToken, stateAbbr }) => {
               'fill-color': [
                 'interpolate',
                 ['linear'],
-                ['get', 'value'],
+                ['get', metricForColor],
                 ...getColorScale(choroplethData).reduce((acc, [value, color]) => acc.concat(value, color), [])
               ],
               'fill-opacity': 0.8,
@@ -567,13 +606,13 @@ const Map = ({ mapboxToken, stateAbbr }) => {
                   valuesDiv.style.fontSize = '0.9em';
 
                   // Format the current value based on the active metric
-                  const currentValue = props.value || 0;
+                  const currentValue = props[getMetricProperty()] || 0;
                   const formattedValue = currentValue.toFixed(2);
 
                   // Create a more informative display
                   valuesDiv.innerHTML = `
                     <div style="margin-bottom: 5px;">
-                      <strong>Current Value:</strong> ${formattedValue} µg/m³
+                      <strong>Current Value:</strong> ${formattedValue} ${activeMetric.includes('pop_weighted') ? 'person-µg/m³' : 'µg/m³'}
                     </div>
                     <div style="display: flex; margin-bottom: 3px;">
                       <span>Total PM2.5:</span> 
@@ -587,6 +626,20 @@ const Map = ({ mapboxToken, stateAbbr }) => {
                       <span>Non-fire PM2.5:</span> 
                       <span style="margin-left: 8px;">${(props.avg_nonfire || 0).toFixed(2)} µg/m³</span>
                     </div>
+                    ${activeMetric.includes('pop_weighted') ? `
+                    <div style="display: flex; margin-bottom: 3px;">
+                      <span>Pop-weighted Total:</span> 
+                      <span style="margin-left: 8px;">${(props.pop_weighted_total || 0).toLocaleString()} person-µg/m³</span>
+                    </div>
+                    <div style="display: flex; margin-bottom: 3px;">
+                      <span>Pop-weighted Fire:</span> 
+                      <span style="margin-left: 8px;">${(props.pop_weighted_fire || 0).toLocaleString()} person-µg/m³</span>
+                    </div>
+                    <div style="display: flex; margin-bottom: 3px;">
+                      <span>Pop-weighted Non-fire:</span> 
+                      <span style="margin-left: 8px;">${(props.pop_weighted_nonfire || 0).toLocaleString()} person-µg/m³</span>
+                    </div>
+                    ` : ''}
                     ${props.population ? `
                     <div style="margin-top: 8px; padding-top: 5px; border-top: 1px solid #eee;">
                       <strong>Population:</strong> ${props.population.toLocaleString()}
@@ -628,7 +681,7 @@ const Map = ({ mapboxToken, stateAbbr }) => {
                   popupNode.appendChild(nameDiv);
 
                   const valueDiv = document.createElement('div');
-                  valueDiv.textContent = `${getMetricLabel()}: ${(props.value || 0).toFixed(2)} µg/m³`;
+                  valueDiv.textContent = `${getMetricLabel()}: ${(props[getMetricProperty()] || 0).toFixed(2)} ${activeMetric.includes('pop_weighted') ? 'person-µg/m³' : 'µg/m³'}`;
                   popupNode.appendChild(valueDiv);
 
                   popup
@@ -693,80 +746,84 @@ const Map = ({ mapboxToken, stateAbbr }) => {
 
   // Helper function to get color scale based on metric
   const getColorScale = (data = null) => {
+    const metric = getMetricProperty();
     // If we have data, calculate dynamic scale
     if (data) {
-      return calculateDynamicColorScale(data, activeMetric);
+      return calculateDynamicColorScale(data, metric);
     }
 
     // Fallback to static scales
-    if (activeMetric.includes('fire') && !activeMetric.includes('nonfire')) {
+    if (metric.includes('pop_weighted')) {
+      return POP_WEIGHTED_COLORS;
+    } else if (metric.includes('fire') && !metric.includes('nonfire')) {
       return PM25_COLORS_FIRE;
     }
     return PM25_COLORS_TOTAL;
   };
 
   // Helper function to get metric label
-  const getMetricLabel = (metric = activeMetric) => {
+  const getMetricLabel = (metric = getMetricProperty()) => {
     const labels = {
       'avg_total': 'Average Total PM2.5',
       'avg_fire': 'Average Fire PM2.5',
       'avg_nonfire': 'Average Non-fire PM2.5',
       'max_total': 'Maximum Total PM2.5',
-      'max_fire': 'Maximum Fire PM2.5'
+      'max_fire': 'Maximum Fire PM2.5',
+      'pop_weighted_total': 'Population-Weighted Total PM2.5',
+      'pop_weighted_fire': 'Population-Weighted Fire PM2.5',
+      'pop_weighted_nonfire': 'Population-Weighted Non-fire PM2.5'
     };
     return labels[metric] || 'PM2.5';
   };
 
-  // Update map layers when choroplethData or activeMetric changes
+  // Update map layers when choroplethData, activeMetric, or subMetric changes
   useEffect(() => {
     if (!map.current || !choroplethData) return;
 
     const mapInstance = map.current;
+    const metricForColor = getMetricProperty();
 
-    // If layer doesn't exist, create it
-    if (!mapInstance.getLayer('pm25-layer')) {
-      // Add the source if it doesn't exist
-      if (!mapInstance.getSource('pm25')) {
-        mapInstance.addSource('pm25', {
-          type: 'geojson',
-          data: choroplethData,
-          generateId: true
-        });
-      }
-
-      // Add the layer
-      mapInstance.addLayer({
-        id: 'pm25-layer',
-        type: 'fill',
-        source: 'pm25',
-        paint: {
-          'fill-color': [
-            'interpolate',
-            ['linear'],
-            ['get', 'value'],
-            ...getColorScale(choroplethData).reduce((acc, [value, color]) => acc.concat(value, color), [])
-          ],
-          'fill-opacity': 0.8,
-          'fill-outline-color': 'rgba(0,0,0,0.2)'
-        }
-      }, 'waterway-label');
-    } else {
-      // Layer exists, just update the data and paint properties
-      mapInstance.getSource('pm25').setData(choroplethData);
-
-      // Update the fill color based on new metric
-      mapInstance.setPaintProperty('pm25-layer', 'fill-color', [
-        'interpolate',
-        ['linear'],
-        ['get', 'value'],
-        ...getColorScale(choroplethData).reduce((acc, [value, color]) => acc.concat(value, color), [])
-      ]);
+    // Remove the layer if it exists
+    if (mapInstance.getLayer('pm25-layer')) {
+      mapInstance.removeLayer('pm25-layer');
     }
+    // Add or update the source
+    if (!mapInstance.getSource('pm25')) {
+      mapInstance.addSource('pm25', {
+        type: 'geojson',
+        data: choroplethData,
+        generateId: true
+      });
+    } else {
+      mapInstance.getSource('pm25').setData(choroplethData);
+    }
+    // Add the layer
+    mapInstance.addLayer({
+      id: 'pm25-layer',
+      type: 'fill',
+      source: 'pm25',
+      paint: {
+        'fill-color': [
+          'interpolate',
+          ['linear'],
+          ['get', metricForColor],
+          ...getColorScale(choroplethData).reduce((acc, [value, color]) => acc.concat(value, color), [])
+        ],
+        'fill-opacity': 0.8,
+        'fill-outline-color': 'rgba(0,0,0,0.2)'
+      }
+    }, 'waterway-label');
 
     // Update the legend
     updateLegend();
 
-  }, [choroplethData, activeMetric]);
+  }, [choroplethData, activeMetric, subMetric]);
+
+  // Refetch choropleth data when main metric, time params, or subMetric change
+  useEffect(() => {
+    fetchChoroplethData();
+    // eslint-disable-next-line
+  }, [activeMetric, timeScale, year, month, season, subMetric]);
 
   if (error) {
     return (
@@ -936,22 +993,94 @@ const Map = ({ mapboxToken, stateAbbr }) => {
         borderRadius: '4px',
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
         zIndex: 1,
-        minWidth: '200px'
+        minWidth: '200px',
+        marginBottom: '10px'
       }}>
         <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>PM2.5 Metric</div>
+        <label style={{ display: 'block', marginBottom: '8px' }}>
+          <input
+            type="radio"
+            name="metric"
+            checked={activeMetric === 'average'}
+            onChange={() => {
+              setActiveMetric('average');
+              setSubMetric('total');
+            }}
+            style={{ marginRight: '8px' }}
+          />
+          Average
+        </label>
+        <label style={{ display: 'block', marginBottom: '8px' }}>
+          <input
+            type="radio"
+            name="metric"
+            checked={activeMetric === 'max'}
+            onChange={() => {
+              setActiveMetric('max');
+              setSubMetric('total');
+            }}
+            style={{ marginRight: '8px' }}
+          />
+          Maximum
+        </label>
+        <label style={{ display: 'block', marginBottom: '8px' }}>
+          <input
+            type="radio"
+            name="metric"
+            checked={activeMetric === 'pop_weighted'}
+            onChange={() => {
+              setActiveMetric('pop_weighted');
+              setSubMetric('total');
+            }}
+            style={{ marginRight: '8px' }}
+          />
+          Population-Weighted
+        </label>
+      </div>
 
-        {['avg_total', 'avg_fire', 'avg_nonfire', 'max_total', 'max_fire'].map(metric => (
-          <label key={metric} style={{ display: 'block', marginBottom: '8px' }}>
-            <input
-              type="radio"
-              name="metric"
-              checked={activeMetric === metric}
-              onChange={() => handleMetricChange(metric)}
-              style={{ marginRight: '8px' }}
-            />
-            {getMetricLabel(metric)}
-          </label>
-        ))}
+      {/* Sub-metric Selector Box */}
+      <div style={{
+        position: 'absolute',
+        top: '200px', // below the metric box
+        right: '20px',
+        backgroundColor: 'white',
+        padding: '15px',
+        borderRadius: '4px',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+        zIndex: 1,
+        minWidth: '200px'
+      }}>
+        <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>PM 2.5 Type</div>
+        <label style={{ display: 'block', marginBottom: '4px' }}>
+          <input
+            type="radio"
+            name="subMetric"
+            checked={subMetric === 'total'}
+            onChange={() => setSubMetric('total')}
+            style={{ marginRight: '6px' }}
+          />
+          Total
+        </label>
+        <label style={{ display: 'block', marginBottom: '4px' }}>
+          <input
+            type="radio"
+            name="subMetric"
+            checked={subMetric === 'fire'}
+            onChange={() => setSubMetric('fire')}
+            style={{ marginRight: '6px' }}
+          />
+          Fire
+        </label>
+        <label style={{ display: 'block', marginBottom: '4px' }}>
+          <input
+            type="radio"
+            name="subMetric"
+            checked={subMetric === 'nonfire'}
+            onChange={() => setSubMetric('nonfire')}
+            style={{ marginRight: '6px' }}
+          />
+          Non-fire
+        </label>
       </div>
 
       {/* Legend */}
@@ -969,12 +1098,12 @@ const Map = ({ mapboxToken, stateAbbr }) => {
         }}
       >
         <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>
-          {getMetricLabel()} (μg/m³)
+          {getMetricLabel()} ({activeMetric.includes('pop_weighted') ? 'person-μg/m³' : 'μg/m³'})
         </div>
         {getColorScale(choroplethData).map(([value, color], i, arr) => {
           const label = i === arr.length - 1
-            ? `${value.toFixed(1)}+`
-            : `${value.toFixed(1)} - ${arr[i + 1][0].toFixed(1)}`;
+            ? `${value.toLocaleString()}+`
+            : `${value.toLocaleString()} - ${arr[i + 1][0].toLocaleString()}`;
 
           return (
             <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
@@ -1016,18 +1145,6 @@ const Map = ({ mapboxToken, stateAbbr }) => {
       )}
     </div>
   );
-};
-
-// Helper function to get metric label (outside component for reuse)
-const getMetricLabel = (metric) => {
-  const labels = {
-    'avg_total': 'Average Total PM2.5',
-    'avg_fire': 'Average Fire PM2.5',
-    'avg_nonfire': 'Average Non-fire PM2.5',
-    'max_total': 'Maximum Total PM2.5',
-    'max_fire': 'Maximum Fire PM2.5'
-  };
-  return labels[metric] || 'PM2.5';
 };
 
 export default React.memo(Map);
