@@ -1,20 +1,46 @@
 import React from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, LabelList } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, LabelList, Rectangle } from "recharts";
+import { pm25ToAqiInfo } from '../utils/aqi';
 
 const COLORS = {
   nonFire: "#90caf9", // blue
   fire: "#ffb74d",    // orange
 };
 
+// Custom shape for dynamic fill
+const CustomBarShape = (props) => {
+  const { fill, ...rest } = props;
+  // Use fill from data if present
+  const barFill = props.payload && props.payload[props.fillKey] ? props.payload[props.fillKey] : fill;
+  return <Rectangle {...rest} fill={barFill} />;
+};
+
+// Helper to convert hex color to rgba
+function hexToRgba(hex, alpha) {
+  // Remove # if present
+  hex = hex.replace('#', '');
+  // Parse r, g, b
+  const bigint = parseInt(hex, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 export default function CountyBarChart({ data, timeScale }) {
   // Ensure data is properly formatted
   const formattedData = data.map(item => {
     // Handle both 'nonFire' and 'nonfire' property names
     const nonFireValue = item.nonFire !== undefined ? item.nonFire : item.nonfire;
+    const fireValue = Math.max(0, Number(item.fire) || 0);
+    const nonFireValueNum = Math.max(0, Number(nonFireValue) || 0);
+    const totalPM25 = fireValue + nonFireValueNum;
+    
     return {
       ...item,
-      fire: Math.max(0, Number(item.fire) || 0),
-      nonFire: Math.max(0, Number(nonFireValue) || 0)
+      fire: fireValue,
+      nonFire: nonFireValueNum,
+      total: totalPM25
     };
   });
 
@@ -96,11 +122,33 @@ export default function CountyBarChart({ data, timeScale }) {
     }
   };
 
+  // Assign fill colors to each data point
+  const isDailyChart = timeScale === 'monthly' || timeScale === 'seasonal';
+  
+  if (isDailyChart) {
+    // For daily charts (monthly/seasonal), use AQI-based colors with transparency
+    chartData.forEach(d => {
+      const aqiInfo = pm25ToAqiInfo(d.total);
+      d.nonFireFill = hexToRgba(aqiInfo.color, 0.4); // 40% transparency for non-fire
+      d.fireFill = hexToRgba(aqiInfo.color, 0.8);     // 80% transparency for fire (darker)
+    });
+  } else {
+    // For yearly charts, use original colors
+    chartData.forEach(d => {
+      d.nonFireFill = COLORS.nonFire;
+      d.fireFill = COLORS.fire;
+    });
+  }
+
+  // console.log('chartData', chartData);
+
   // Custom tooltip formatter
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       const total = (payload[0].value + payload[1].value).toFixed(2);
+      const pm25 = data.total;
+      const aqiInfo = pm25ToAqiInfo(pm25);
 
       let dateLabel = label;
       if (timeScale !== 'yearly' && data.date) {
@@ -119,15 +167,22 @@ export default function CountyBarChart({ data, timeScale }) {
           <p style={{ margin: 0, fontWeight: 'bold' }}>
             {timeScale === 'yearly' ? `Year ${dateLabel}` : dateLabel}
           </p>
-          <p style={{ margin: 0, color: COLORS.fire }}>
+          <p style={{ margin: 0, color: payload[1].payload.fireFill }}>
             Fire PM2.5: {payload[1].value.toFixed(2)} µg/m³
           </p>
-          <p style={{ margin: 0, color: COLORS.nonFire }}>
+          <p style={{ margin: 0, color: payload[0].payload.nonFireFill }}>
             Non-Fire PM2.5: {payload[0].value.toFixed(2)} µg/m³
           </p>
           <p style={{ margin: 0, fontWeight: 'bold' }}>
             Total: {total} µg/m³
           </p>
+          {isDailyChart && (
+            <>
+              <p style={{ margin: 0, fontWeight: 'bold', color: aqiInfo.color }}>
+                AQI: {aqiInfo.aqi} ({aqiInfo.category})
+              </p>
+            </>
+          )}
         </div>
       );
     }
@@ -137,15 +192,16 @@ export default function CountyBarChart({ data, timeScale }) {
   return (
     <div style={{
       width: containerWidth,
-      height: 180,
+      height: isDailyChart ? 280 : 210, // Increase height for daily charts to accommodate legend
       boxSizing: 'border-box',
       overflowX: timeScale !== 'yearly' && chartWidth > containerWidth ? 'auto' : 'visible'
     }}>
+      
       <BarChart
         width={chartWidth}
         height={180}
         data={chartData}
-        margin={{ top: 20, right: 20, left: 20, bottom: 20 }}
+        margin={{ top: 20, right: 40, left: 5, bottom: 20 }}
         barSize={barSize}
       >
         <CartesianGrid strokeDasharray="3 3" />
@@ -166,18 +222,58 @@ export default function CountyBarChart({ data, timeScale }) {
             angle: -90,
             position: 'insideLeft',
             style: { textAnchor: 'middle', fontSize: 9 },
-            offset: -15
+            offset: 0
           }}
         />
         <Tooltip content={<CustomTooltip />} />
-        <Legend wrapperStyle={{ fontSize: 9 }} />
-        <Bar dataKey="nonFire" stackId="a" fill={COLORS.nonFire} name="Non-Fire PM2.5" />
+        {/* Custom Legend */}
+        {isDailyChart ? (
+          <Legend 
+            wrapperStyle={{ fontSize: 9 }}
+            content={({ payload }) => (
+              <div style={{ textAlign: 'center', fontSize: 9, marginTop: 5 }}>
+                <span style={{ marginRight: 15 }}>
+                  <span style={{ 
+                    display: 'inline-block', 
+                    width: 12, 
+                    height: 12, 
+                    backgroundColor: 'rgba(128,128,128,0.4)', 
+                    marginRight: 4,
+                    verticalAlign: 'middle'
+                  }}></span>
+                  Non-Fire PM2.5 (AQI Color)
+                </span>
+                <span>
+                  <span style={{ 
+                    display: 'inline-block', 
+                    width: 12, 
+                    height: 12, 
+                    backgroundColor: 'rgba(128,128,128,0.8)', 
+                    marginRight: 4,
+                    verticalAlign: 'middle'
+                  }}></span>
+                  Fire PM2.5 (AQI Color)
+                </span>
+              </div>
+            )}
+          />
+        ) : (
+          <Legend wrapperStyle={{ fontSize: 9 }} />
+        )}
+        <Bar
+          dataKey="nonFire"
+          stackId="a"
+          name="Non-Fire PM2.5"
+          fill={COLORS.nonFire}
+          shape={(props) => <CustomBarShape {...props} fillKey="nonFireFill" />}
+        />
         <Bar
           dataKey="fire"
           stackId="a"
-          fill={COLORS.fire}
           name="Fire PM2.5"
           isAnimationActive={false}
+          fill={COLORS.fire}
+          shape={(props) => <CustomBarShape {...props} fillKey="fireFill" />}
         >
           {/* Only show total labels for yearly data to avoid clutter */}
           {timeScale === 'yearly' && (
@@ -207,27 +303,50 @@ export default function CountyBarChart({ data, timeScale }) {
           strokeDasharray="6 3"
           label={{
             value: 'Annual Std.',
-            position: 'left',
+            position: 'right',
             fill: '#d32f2f',
             fontSize: 7,
             offset: 2
           }}
         />
         {maxValue > 35 && timeScale !== 'yearly' && (
-        <ReferenceLine
-          y={35}
-          stroke="#d32f2f"
-          strokeDasharray="10 5"
-          label={{
-            value: 'Daily Std.',
-            position: 'left',
-            fill: '#d32f2f',
-            fontSize: 7,
-            offset: 2
-          }}
-        />
+          <ReferenceLine
+            y={35}
+            stroke="#d32f2f"
+            strokeDasharray="10 5"
+            label={{
+              value: 'Daily Std.',
+              position: 'right',
+              fill: '#d32f2f',
+              fontSize: 7,
+              offset: 2
+            }}
+          />
         )}
       </BarChart>
+      
+      {/* AQI Legend: only show for daily charts */}
+      {isDailyChart && (
+        <div style={{ 
+          marginTop: 8, 
+          fontSize: 10, 
+          border: '1px solid red',
+          padding: '5px',
+          backgroundColor: 'white',
+          position: 'relative',
+          zIndex: 1000
+        }}>
+          <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>AQI Legend:</div>
+          <div>
+            <span style={{ background: '#00e400', color: '#000', padding: '2px 4px', borderRadius: 3, marginRight: 4, display: 'inline-block' }}>Good</span>
+            <span style={{ background: '#ffff00', color: '#000', padding: '2px 4px', borderRadius: 3, marginRight: 4, display: 'inline-block' }}>Moderate</span>
+            <span style={{ background: '#ff7e00', color: '#fff', padding: '2px 4px', borderRadius: 3, marginRight: 4, display: 'inline-block' }}>Unhealthy for SG</span>
+            <span style={{ background: '#ff0000', color: '#fff', padding: '2px 4px', borderRadius: 3, marginRight: 4, display: 'inline-block' }}>Unhealthy</span>
+            <span style={{ background: '#8f3f97', color: '#fff', padding: '2px 4px', borderRadius: 3, marginRight: 4, display: 'inline-block' }}>Very Unhealthy</span>
+            <span style={{ background: '#7e0023', color: '#fff', padding: '2px 4px', borderRadius: 3, display: 'inline-block' }}>Hazardous</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

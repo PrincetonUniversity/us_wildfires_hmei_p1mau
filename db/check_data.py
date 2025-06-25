@@ -63,6 +63,14 @@ def check_data():
         print("Sample baseline mortality records:")
         for b in db.query(BaselineMortalityRate).limit(3).all():
             print(f"  {b.year} {b.fips} age_group={b.age_group} stat_type={b.stat_type} value={b.value} allage_flag={b.allage_flag} source={b.source}")
+        year = 2020
+        print("YearlyPM25Summary:", db.query(YearlyPM25Summary).filter(YearlyPM25Summary.year == year).count())
+        print("Population:", db.query(Population).filter(Population.year == year).count())
+        print("BaselineMortalityRate:", db.query(BaselineMortalityRate).filter(
+            BaselineMortalityRate.year == year,
+            BaselineMortalityRate.stat_type == '1',
+            BaselineMortalityRate.allage_flag == True
+        ).count())
 
         # Annual Health Metric
         ahm_count = db.query(AnnualHealthMetric).count()

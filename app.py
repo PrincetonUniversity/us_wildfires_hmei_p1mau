@@ -15,12 +15,14 @@ from sqlalchemy import func, and_, or_, extract, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from concurrent.futures import ThreadPoolExecutor
+import math
 
 # Application imports
 from db.database import SessionLocal, engine, Base
 from db.models import (
     DailyPM25, County, Population, Demographics,
-    YearlyPM25Summary, MonthlyPM25Summary, SeasonalPM25Summary
+    YearlyPM25Summary, MonthlyPM25Summary, SeasonalPM25Summary,
+    BaselineMortalityRate
 )
 
 import geopandas as gpd
@@ -96,9 +98,6 @@ def load_county_geometries():
 async def lifespan(app: FastAPI):
     # Startup: Initialize resources
     logger.info("Starting up...")
-    
-    # Create database tables if they don't exist
-    # Base.metadata.create_all(bind=engine)
     
     # Load county geometries
     load_county_geometries()
@@ -848,6 +847,87 @@ async def get_county_statistics(
         
     except Exception as e:
         logger.error(f"Error in statistics: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/mortality_impact")
+def get_mortality_impact(
+    year: int = Query(None, description="Year to filter (optional)"),
+    fips: str = Query(None, description="County FIPS code to filter (optional)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Compute GEMM-based excess mortality for each county-year using:
+    ΔMortality = Population × y₀ × (exp(β × PM₂.₅) - 1)
+    Joins yearly_pm25_summary, population, and baseline_mortality_rate.
+    """
+    beta = 0.0058
+    try:
+        # Build base query
+        query = db.query(
+            YearlyPM25Summary.fips,
+            County.name.label("county_name"),
+            YearlyPM25Summary.year,
+            YearlyPM25Summary.avg_total.label("pm25"),
+            Population.population,
+            func.avg(BaselineMortalityRate.value).label("y0_avg")
+        ).join(
+            County, County.fips == YearlyPM25Summary.fips
+        ).join(
+            Population, and_(
+                Population.fips == YearlyPM25Summary.fips,
+                Population.year == YearlyPM25Summary.year
+            )
+        ).join(
+            BaselineMortalityRate, and_(
+                BaselineMortalityRate.fips == YearlyPM25Summary.fips,
+                BaselineMortalityRate.year == YearlyPM25Summary.year,
+                BaselineMortalityRate.stat_type == '1',
+                BaselineMortalityRate.source == 'basemor_ALL'
+            )
+        ).group_by(
+            YearlyPM25Summary.fips,
+            County.name,
+            YearlyPM25Summary.year,
+            YearlyPM25Summary.avg_total,
+            Population.population
+        )
+
+        if year:
+            query = query.filter(YearlyPM25Summary.year == year)
+        if fips:
+            query = query.filter(YearlyPM25Summary.fips == fips)
+
+        results = []
+        for row in query.all():
+            pm25 = row.pm25 or 0
+            pop = row.population or 0
+            y0 = row.y0_avg or 0
+
+            # Ensure all are valid numbers
+            if pm25 is None or not math.isfinite(pm25):
+                pm25 = 0
+            if pop is None or not math.isfinite(pop):
+                pop = 0
+            if y0 is None or not math.isfinite(y0):
+                y0 = 0
+
+            delta_mortality = pop * y0 * (np.exp(beta * pm25) - 1)
+            if not math.isfinite(delta_mortality):
+                delta_mortality = 0
+
+            results.append({
+                "fips": row.fips,
+                "county_name": row.county_name,
+                "year": row.year,
+                "pm25": pm25,
+                "population": pop,
+                "y0": y0,
+                "delta_mortality": delta_mortality
+            })
+        return results
+    except Exception as e:
+        print(e)
+        logger.error(f"Error in health impact endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Health check endpoint

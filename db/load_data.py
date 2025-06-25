@@ -393,6 +393,11 @@ class DataLoader:
         logger.info(f"Loading baseline mortality rates from {filepath}")
 
         try:
+            # Clear existing table
+            logger.info("Clearing existing table...")
+            self.db.query(BaselineMortalityRate).delete()
+            self.db.commit()
+
             df = pd.read_csv(filepath)
             # Clean column names
             df.columns = df.columns.str.strip().str.replace('"', '')
@@ -410,7 +415,7 @@ class DataLoader:
                 record = BaselineMortalityRate(
                     fips=fips,
                     county_index=county_index,
-                    year=int(row['year']),
+                    year=(int(row['year']) + 1999),
                     age_group=int(row['age_group']),
                     stat_type=str(row['stat']),
                     value=float(row['value']),

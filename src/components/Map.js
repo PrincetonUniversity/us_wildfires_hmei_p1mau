@@ -95,10 +95,10 @@ const calculateDynamicColorScale = (data, metric) => {
   const range = max - min;
   const step = range / 5;
 
-  // Base colors (same as your existing scales)
+  // Base colors (same as existing scales)
   const colors = ['#fff7bc', '#fee391', '#fec44f', '#fe9929', '#ec7014', '#cc4c02'];
 
-  return colors.map((color, i) => [min + (step * i), color]);
+  return colors.map((color, i) => [Math.floor(min + (step * i)), color]);
 };
 
 const Map = ({ mapboxToken, stateAbbr }) => {
@@ -218,7 +218,7 @@ const Map = ({ mapboxToken, stateAbbr }) => {
       let params = new URLSearchParams();
       let endpoint = `http://localhost:8000/api/pm25/bar_chart/${fips}`;
 
-      console.log('Fetching bar chart data with time scale:', currentTimeScale);
+      // console.log('Fetching bar chart data with time scale:', currentTimeScale);
 
       // Add parameters based on the time scale
       if (currentTimeScale === 'yearly') {
@@ -273,7 +273,7 @@ const Map = ({ mapboxToken, stateAbbr }) => {
       }
 
       const data = await response.json();
-      console.log('Received bar chart data:', data);
+      // console.log('Received bar chart data:', data);
 
       // Ensure data is an array
       if (!Array.isArray(data)) {
@@ -571,13 +571,6 @@ const Map = ({ mapboxToken, stateAbbr }) => {
                 map.current.getCanvas().style.cursor = 'pointer';
 
                 try {
-                  console.log('Current time scale parameters:', {
-                    timeScale,
-                    year,
-                    month,
-                    season
-                  });
-
                   // Fetch bar chart data for this county with current time scale parameters
                   const barChartData = await fetchBarChartData(
                     countyId,
