@@ -451,6 +451,104 @@ def build_geojson_features(results, value_func):
 # --- New Modular Endpoints ---
 choropleth_router = APIRouter(prefix="/api/counties/choropleth", tags=["Choropleth"])
 
+@choropleth_router.get("/mortality")
+async def get_choropleth_mortality(
+    year: int = Query(..., description="Year required for mortality data"),
+    db: Session = Depends(get_db)
+):
+    """Get mortality impact choropleth data."""
+    try:
+        # Build query for mortality data using LEFT JOINs to handle missing data
+        query = db.query(
+            County.fips,
+            County.name.label("county_name"),
+            County.geometry,
+            YearlyPM25Summary.avg_total.label("pm25"),
+            Population.population,
+            func.avg(BaselineMortalityRate.value).label("y0_avg")
+        ).join(
+            YearlyPM25Summary, and_(
+                YearlyPM25Summary.fips == County.fips,
+                YearlyPM25Summary.year == year
+            )
+        ).outerjoin(  # Use LEFT JOIN for population
+            Population, and_(
+                Population.fips == County.fips,
+                Population.year == year
+            )
+        ).outerjoin(  # Use LEFT JOIN for baseline mortality rate
+            BaselineMortalityRate, and_(
+                BaselineMortalityRate.fips == County.fips,
+                BaselineMortalityRate.year == year,
+                BaselineMortalityRate.stat_type == '1',
+                BaselineMortalityRate.source == 'basemor_ALL'
+            )
+        ).filter(
+            ~County.fips.startswith('72')  # Exclude Puerto Rico
+        ).group_by(
+            County.fips,
+            County.name,
+            County.geometry,
+            YearlyPM25Summary.avg_total,
+            Population.population
+        )
+        
+        results = query.all()
+        features = []
+        
+        beta = 0.0058  # GEMM coefficient
+        
+        for row in results:
+            if not row.geometry:
+                continue
+                
+            pm25 = row.pm25 or 0
+            pop = row.population or 0
+            y0 = row.y0_avg or 0
+            
+            # Ensure all are valid numbers
+            if pm25 is None or not math.isfinite(pm25):
+                pm25 = 0
+            if pop is None or not math.isfinite(pop):
+                pop = 0
+            if y0 is None or not math.isfinite(y0):
+                y0 = 0
+            
+            # Calculate excess mortality
+            delta_mortality = pop * y0 * (np.exp(beta * pm25) - 1)
+            if not math.isfinite(delta_mortality):
+                delta_mortality = 0
+            
+            feature = {
+                "type": "Feature",
+                "geometry": row.geometry,
+                "properties": {
+                    "fips": row.fips,
+                    "county_name": row.county_name,
+                    "value": float(delta_mortality),
+                    "pm25": float(pm25),
+                    "population": int(pop),
+                    "y0": float(y0),
+                    "delta_mortality": float(delta_mortality)
+                }
+            }
+            features.append(feature)
+        
+        return {
+            "type": "FeatureCollection",
+            "features": features,
+            "metadata": {
+                "time_scale": "yearly",
+                "year": year,
+                "metric": "mortality",
+                "feature_count": len(features)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in mortality choropleth: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @choropleth_router.get("/average")
 async def get_choropleth_average(
     time_scale: str = Query("yearly", pattern="^(yearly|monthly|seasonal)$"),
@@ -567,6 +665,68 @@ async def get_choropleth_pop_weighted(
             "feature_count": len(features)
         }
     }
+
+@choropleth_router.get("/population")
+async def get_choropleth_population(
+    year: Optional[int] = Query(2020, description="Year for population data (optional, defaults to 2020)"),
+    db: Session = Depends(get_db)
+):
+    """Get population choropleth data."""
+    try:
+        # Build query for population data
+        query = db.query(
+            County.fips,
+            County.name.label("county_name"),
+            County.geometry,
+            Population.population
+        ).outerjoin(  # Use LEFT JOIN to include counties even if they don't have population data
+            Population, and_(
+                Population.fips == County.fips,
+                Population.year == year
+            )
+        ).filter(
+            ~County.fips.startswith('72')  # Exclude Puerto Rico
+        )
+        
+        results = query.all()
+        features = []
+        
+        for row in results:
+            if not row.geometry:
+                continue
+                
+            pop = row.population or 0
+            
+            # Ensure valid number
+            if pop is None or not math.isfinite(pop):
+                pop = 0
+            
+            feature = {
+                "type": "Feature",
+                "geometry": row.geometry,
+                "properties": {
+                    "fips": row.fips,
+                    "county_name": row.county_name,
+                    "value": int(pop),
+                    "population": int(pop)
+                }
+            }
+            features.append(feature)
+        
+        return {
+            "type": "FeatureCollection",
+            "features": features,
+            "metadata": {
+                "time_scale": "yearly",
+                "year": year,
+                "metric": "population",
+                "feature_count": len(features)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in population choropleth: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Register the router
 app.include_router(choropleth_router)

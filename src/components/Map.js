@@ -42,6 +42,16 @@ const POP_WEIGHTED_COLORS = [
   [50000000, '#e7298a']  // dark pink
 ];
 
+// Color scale for mortality values (light red to dark red)
+const MORTALITY_COLORS = [
+  [0, '#fee5d9'],      // very light red
+  [10, '#fcae91'],     // light red
+  [25, '#fb6a4a'],     // red
+  [50, '#de2d26'],     // dark red
+  [100, '#a50f15'],    // very dark red
+  [200, '#67000d']     // darkest red
+];
+
 // State FIPS to abbreviation mapping
 const STATE_FIPS_TO_ABBR = {
   '01': 'AL', '02': 'AK', '04': 'AZ', '05': 'AR', '06': 'CA', '08': 'CO', '09': 'CT', '10': 'DE',
@@ -91,6 +101,13 @@ const calculateDynamicColorScale = (data, metric) => {
   const min = values[0];
   const max = values[values.length - 1];
 
+  // Handle edge case where all values are the same
+  if (min === max) {
+    if (metric.includes('pop_weighted')) return POP_WEIGHTED_COLORS;
+    if (metric.includes('fire') && !metric.includes('nonfire')) return PM25_COLORS_FIRE;
+    return PM25_COLORS_TOTAL;
+  }
+
   // Create 6 evenly distributed breakpoints
   const range = max - min;
   const step = range / 5;
@@ -98,45 +115,153 @@ const calculateDynamicColorScale = (data, metric) => {
   // Base colors (same as existing scales)
   const colors = ['#fff7bc', '#fee391', '#fec44f', '#fe9929', '#ec7014', '#cc4c02'];
 
-  return colors.map((color, i) => [Math.floor(min + (step * i)), color]);
+  // Generate breakpoints and ensure they are strictly ascending
+  const breakpoints = [];
+  for (let i = 0; i < colors.length; i++) {
+    let value;
+    if (i === 0) {
+      value = min;
+    } else if (i === colors.length - 1) {
+      value = max;
+    } else {
+      value = min + (step * i);
+    }
+
+    // Ensure the value is unique and strictly greater than the previous one
+    if (breakpoints.length > 0 && value <= breakpoints[breakpoints.length - 1][0]) {
+      value = breakpoints[breakpoints.length - 1][0] + 0.1;
+    }
+
+    breakpoints.push([value, colors[i]]);
+  }
+
+  return breakpoints;
 };
 
-const Map = ({ mapboxToken, stateAbbr }) => {
+const PM25_LAYERS = ['average', 'max', 'pop_weighted'];
+const HEALTH_LAYERS = ['mortality', 'population'];
+
+const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelect, onCountyHover, mapRefreshKey, onMapLoaded, selectedCounty }) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
+  const popup = useRef(null); // Persistent popup
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeMetric, setActiveMetric] = useState('average'); // default to 'average'
-  const [timeScale, setTimeScale] = useState('yearly');
-  const [year, setYear] = useState(2023);
-  const [month, setMonth] = useState(1); // 1-12
-  const [season, setSeason] = useState('winter');
-  const [pendingUpdate, setPendingUpdate] = useState(false);
   const [choroplethData, setChoroplethData] = useState(null);
   const currentCountyRef = useRef(null);
-  const [subMetric, setSubMetric] = useState('total'); // default to 'total'
+
+  // Destructure time controls
+  const { timeScale, year, month, season } = timeControls;
+
+  // Debug: log current time controls on every render
+  console.log('Map.js time controls:', { timeScale, year, month, season });
+
+  // Determine metric and subMetric from new props
+  let metric = 'average';
+  let subMetric = 'total';
+  if (PM25_LAYERS.includes(activeLayer)) {
+    metric = activeLayer;
+    if (pm25SubLayer) subMetric = pm25SubLayer;
+  } else if (HEALTH_LAYERS.includes(activeLayer)) {
+    // For health layers, set appropriate defaults
+    metric = activeLayer;
+    subMetric = 'total'; // Default for health layers
+  }
+
+  // Fetch choropleth data when mapRefreshKey or any relevant prop changes
+  useEffect(() => {
+    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer)) return;
+    let isMounted = true;
+    const fetchChoroplethData = async () => {
+      try {
+        setLoading(true);
+        let params = new URLSearchParams();
+        let endpoint = '/api/counties/choropleth/average';
+
+        console.log('Fetching choropleth data for layer:', activeLayer);
+
+        if (PM25_LAYERS.includes(activeLayer)) {
+          // PM2.5 layers
+          params.append('time_scale', timeScale);
+          if (year) params.append('year', year.toString());
+          if (timeScale === 'monthly' && month) params.append('month', month.toString());
+          if (timeScale === 'seasonal' && season) params.append('season', season);
+          params.append('sub_metric', subMetric);
+
+          if (metric === 'max') endpoint = '/api/counties/choropleth/max';
+          if (metric === 'pop_weighted') endpoint = '/api/counties/choropleth/pop_weighted';
+        } else if (HEALTH_LAYERS.includes(activeLayer)) {
+          // Health layers
+          if (activeLayer === 'mortality') {
+            endpoint = '/api/counties/choropleth/mortality';
+            params.append('year', year.toString());
+            console.log('Fetching mortality data for year:', year);
+          } else if (activeLayer === 'population') {
+            endpoint = '/api/counties/choropleth/population';
+            params.append('year', year.toString());
+            console.log('Fetching population data for year:', year);
+          }
+          // Add other health layers here as needed
+        }
+
+        console.log('Making request to:', `http://localhost:8000${endpoint}?${params}`);
+        const response = await fetch(`http://localhost:8000${endpoint}?${params}`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to fetch choropleth data: ${response.status} ${response.statusText}\n${errorText}`);
+        }
+        const data = await response.json();
+        console.log('Received choropleth data:', data.features ? `${data.features.length} features` : 'No features');
+        if (isMounted) {
+          setChoroplethData(data);
+          setLoading(false);
+          if (onMapLoaded) onMapLoaded();
+        }
+      } catch (err) {
+        console.error('Error fetching choropleth data:', err);
+        if (isMounted) {
+          setError(err.message);
+          setLoading(false);
+          if (onMapLoaded) onMapLoaded();
+        }
+      }
+    };
+    fetchChoroplethData();
+    return () => { isMounted = false; };
+  }, [mapRefreshKey, activeLayer, timeScale, year, month, season, pm25SubLayer, subMetric]);
+
+  // Proper cleanup when switching to health layers or timeScale changes
+  useEffect(() => {
+    if (!map.current) return;
+    const legend = document.getElementById('legend');
+    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer)) {
+      if (legend) legend.style.display = 'none';
+    } else {
+      if (legend) legend.style.display = 'block';
+    }
+  }, [activeLayer, timeScale]);
 
   // Function to update the legend based on the current metric and data
   const updateLegend = () => {
     if (!map.current) return;
-
     const legend = document.getElementById('legend');
     if (!legend) return;
-
+    // Hide legend for non-mapped layers
+    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer)) {
+      legend.innerHTML = '';
+      legend.style.display = 'none';
+      return;
+    }
+    // Otherwise, show and update legend
+    legend.style.display = 'block';
     const colorScale = getColorScale(choroplethData) || [];
-    const metricLabel = getMetricLabel(activeMetric);
-
-    // Clear existing legend
+    const metricLabel = getMetricLabel(activeLayer);
     legend.innerHTML = '';
-
-    // Add title
     const title = document.createElement('div');
     title.textContent = metricLabel;
     title.style.marginBottom = '5px';
     title.style.fontWeight = 'bold';
     legend.appendChild(title);
-
-    // Add color gradient
     const gradient = document.createElement('div');
     gradient.style.display = 'flex';
     gradient.style.marginBottom = '5px';
@@ -144,20 +269,14 @@ const Map = ({ mapboxToken, stateAbbr }) => {
     gradient.style.width = '100%';
     gradient.style.background = `linear-gradient(to right, ${colorScale.map(([_, color]) => color).join(', ')})`;
     legend.appendChild(gradient);
-
-    // Add labels
     const labels = document.createElement('div');
     labels.style.display = 'flex';
     labels.style.justifyContent = 'space-between';
     labels.style.fontSize = '0.8em';
-
-    // Add min and max values
     const minLabel = document.createElement('span');
     minLabel.textContent = colorScale[0][0].toFixed(1);
-
     const maxLabel = document.createElement('span');
     maxLabel.textContent = `${colorScale[colorScale.length - 1][0].toFixed(1)}+`;
-
     labels.appendChild(minLabel);
     labels.appendChild(maxLabel);
     legend.appendChild(labels);
@@ -165,51 +284,26 @@ const Map = ({ mapboxToken, stateAbbr }) => {
 
   // Helper to get the property name for the current metric and sub-metric
   const getMetricProperty = () => {
-    if (activeMetric === 'average') {
+    if (activeLayer === 'mortality') {
+      return 'delta_mortality';
+    }
+    if (activeLayer === 'population') {
+      return 'population';
+    }
+    if (metric === 'average') {
       if (subMetric === 'total') return 'avg_total';
       if (subMetric === 'fire') return 'avg_fire';
       if (subMetric === 'nonfire') return 'avg_nonfire';
-    } else if (activeMetric === 'max') {
+    } else if (metric === 'max') {
       if (subMetric === 'total') return 'max_total';
       if (subMetric === 'fire') return 'max_fire';
       if (subMetric === 'nonfire') return 'max_nonfire';
-    } else if (activeMetric === 'pop_weighted') {
+    } else if (metric === 'pop_weighted') {
       if (subMetric === 'total') return 'pop_weighted_total';
       if (subMetric === 'fire') return 'pop_weighted_fire';
       if (subMetric === 'nonfire') return 'pop_weighted_nonfire';
     }
     return 'avg_total';
-  };
-
-  // Function to fetch choropleth data with new API
-  const fetchChoroplethData = async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams({
-        time_scale: timeScale,
-        ...(year && { year: year.toString() }),
-        ...(timeScale === 'monthly' && month && { month: month.toString() }),
-        ...(timeScale === 'seasonal' && season && { season }),
-        sub_metric: subMetric // Always send sub_metric
-      });
-      let endpoint = '/api/counties/choropleth/average';
-      if (activeMetric === 'max') endpoint = '/api/counties/choropleth/max';
-      if (activeMetric === 'pop_weighted') endpoint = '/api/counties/choropleth/pop_weighted';
-      const response = await fetch(`http://localhost:8000${endpoint}?${params}`);
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to fetch choropleth data: ${response.status} ${response.statusText}\n${errorText}`);
-      }
-      const data = await response.json();
-      setChoroplethData(data);
-      return data;
-    } catch (err) {
-      console.error('Error fetching choropleth data:', err);
-      setError(err.message);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
   };
 
   // Function to fetch bar chart data for a specific county
@@ -320,7 +414,8 @@ const Map = ({ mapboxToken, stateAbbr }) => {
             fire: item.fire || 0,
             nonFire: item.nonfire || item.nonFire || 0,
             total: item.total || 0,
-            displayType: 'daily'
+            displayType: 'daily',
+            ...(currentTimeScale === 'seasonal' ? { season: currentSeason } : {})
           };
         }).filter(item => {
           // Filter out any data points that don't belong to the selected period
@@ -373,353 +468,35 @@ const Map = ({ mapboxToken, stateAbbr }) => {
     }
   };
 
-  // Handle time scale changes
-  const handleTimeScaleChange = (newScale) => {
-    console.log('Time scale changed to:', newScale);
-    setTimeScale(newScale);
-    setPendingUpdate(true);
-
-    // Reset month/season when changing time scale
-    if (newScale === 'yearly') {
-      setMonth(1);
-      setSeason('winter');
-    } else if (newScale === 'monthly') {
-      setSeason('winter');
-    } else if (newScale === 'seasonal') {
-      setMonth(1);
-    }
-  };
-
-  // Handle year changes
-  const handleYearChange = (newYear) => {
-    setYear(newYear);
-    setPendingUpdate(true);
-  };
-
-  // Handle month changes
-  const handleMonthChange = (newMonth) => {
-    setMonth(newMonth);
-    setPendingUpdate(true);
-  };
-
-  // Handle season changes
-  const handleSeasonChange = (newSeason) => {
-    setSeason(newSeason);
-    setPendingUpdate(true);
-  };
-
-  // Handle metric changes
-  const handleMetricChange = async (newMetric) => {
-    // Automatically fetch new data when metric changes
-    if (map.current && map.current.isStyleLoaded()) {
-      try {
-        // DON'T set loading to true - keep it smooth
-        const params = new URLSearchParams({
-          time_scale: timeScale,
-          metric: newMetric,
-          ...(year && { year: year.toString() }),
-          ...(timeScale === 'monthly' && month && { month: month.toString() }),
-          ...(timeScale === 'seasonal' && season && { season }),
-        });
-
-        console.log('Fetching choropleth data with params:', params.toString());
-        const response = await fetch(`http://localhost:8000/api/counties/choropleth?${params}`);
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Failed to fetch choropleth data: ${response.status} ${response.statusText}\n${errorText}`);
-        }
-        const data = await response.json();
-        setChoroplethData(data);
-        setActiveMetric(newMetric);
-      } catch (err) {
-        console.error('Error updating map data:', err);
-        setError('Failed to update map data: ' + err.message);
-      }
-    }
-  };
-
-  // Handle submit button click
-  const handleSubmit = async () => {
-    if (!map.current || !map.current.isStyleLoaded()) return;
-
-    try {
-      setLoading(true);
-      // Fetch new data with current parameters
-      const response = await fetchChoroplethData();
-      // The fetchChoroplethData function will update choroplethData state
-      setPendingUpdate(false);
-
-      // If there's a current county being hovered, refresh its bar chart
-      if (currentCountyRef.current) {
-        const barChartData = await fetchBarChartData(
-          currentCountyRef.current,
-          timeScale,
-          year,
-          month,
-          season
-        );
-
-        // Update the popup with new bar chart data
-        const popup = map.current.getPopup();
-        if (popup.isOpen()) {
-          const popupNode = popup.getElement();
-          const chartDiv = popupNode.querySelector('div[style*="width: 350px"], div[style*="width: 400px"]');
-          if (chartDiv) {
-            const root = createRoot(chartDiv);
-            root.render(<CountyBarChart data={barChartData} timeScale={timeScale} />);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Error updating map data:', err);
-      setError('Failed to update map data: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Initialize map when component mounts
   useEffect(() => {
+    console.log('Map initialization useEffect triggered:', { activeLayer, pm25SubLayer, PM25_LAYERS: PM25_LAYERS.includes(activeLayer), HEALTH_LAYERS: HEALTH_LAYERS.includes(activeLayer) });
+
     if (!mapboxToken) {
       setError('Mapbox token is missing');
       return;
     }
-
     if (!mapContainer.current) return;
+    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer)) return;
+    // For PM2.5 layers, require sub-layer selection
+    if (PM25_LAYERS.includes(activeLayer) && !pm25SubLayer) return;
 
-    // Set Mapbox token
+    console.log('Initializing map for layer:', activeLayer);
     mapboxgl.accessToken = mapboxToken;
-
-    // Initialize map
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/light-v10',
-      bounds: [
-        -150.0,  // West
-        24.0,    // South
-        -60.0,   // East
-        50.0     // North
-      ],
+      bounds: [-150.0, 24.0, -60.0, 50.0],
       padding: { top: 20, bottom: 20, left: 20, right: 20 }
     });
-
-    // Disable map rotation using right click + drag
     map.current.dragRotate.disable();
-    // Disable map rotation using touch rotation gesture
     map.current.touchZoomRotate.disableRotation();
-
-    // Create a popup but don't add it to the map yet
-    const popup = new mapboxgl.Popup({
+    // Create popup instance ONCE
+    popup.current = new mapboxgl.Popup({
       closeButton: false,
       closeOnClick: false,
-      maxWidth: 'none' // Remove maxWidth constraint
+      maxWidth: 'none'
     });
-
-    // Load initial data when map is ready
-    map.current.on('load', async () => {
-      try {
-        const data = await fetchChoroplethData();
-
-        // Add source and layer
-        if (map.current) {
-          if (!map.current.getSource('pm25')) {
-            map.current.addSource('pm25', {
-              type: 'geojson',
-              data: data,
-              generateId: true
-            });
-          } else {
-            map.current.getSource('pm25').setData(data);
-          }
-
-          // Add the fill layer for PM2.5
-          const metricForColor = getMetricProperty();
-          map.current.addLayer({
-            id: 'pm25-layer',
-            type: 'fill',
-            source: 'pm25',
-            paint: {
-              'fill-color': [
-                'interpolate',
-                ['linear'],
-                ['get', metricForColor],
-                ...getColorScale(choroplethData).reduce((acc, [value, color]) => acc.concat(value, color), [])
-              ],
-              'fill-opacity': 0.8,
-              'fill-outline-color': 'rgba(0,0,0,0.2)'
-            }
-          });
-
-          // Remove any existing mousemove handler
-          map.current.off('mousemove');
-
-          // Add new mousemove handler with current state values
-          map.current.on('mousemove', async (e) => {
-            // Check if we're over a county feature
-            const features = map.current.queryRenderedFeatures(e.point, { layers: ['pm25-layer'] });
-
-            if (features.length > 0) {
-              const feature = features[0];
-              const props = feature.properties;
-              const countyId = props.GEOID || props.FIPS || props.fips;
-
-              // Only update if we're hovering over a different county
-              if (currentCountyRef.current !== countyId) {
-                // Remove existing popup when changing counties
-                popup.remove();
-                currentCountyRef.current = countyId;
-                map.current.getCanvas().style.cursor = 'pointer';
-
-                try {
-                  // Fetch bar chart data for this county with current time scale parameters
-                  const barChartData = await fetchBarChartData(
-                    countyId,
-                    timeScale,
-                    year,
-                    month,
-                    season
-                  );
-
-                  // Create a DOM node for React rendering
-                  const popupNode = document.createElement('div');
-                  popupNode.style.padding = '10px';
-
-                  // Add county name above chart
-                  const nameDiv = document.createElement('div');
-                  nameDiv.style.fontWeight = 'bold';
-                  nameDiv.style.fontSize = '1.1em';
-                  nameDiv.style.marginBottom = '8px';
-                  const stateAbbr = getStateFromFIPS(countyId);
-                  nameDiv.textContent = `${props.county_name || props.NAME || 'Unknown County'}, ${stateAbbr}`;
-                  popupNode.appendChild(nameDiv);
-
-                  // Add current PM2.5 value and other metrics
-                  const valuesDiv = document.createElement('div');
-                  valuesDiv.style.marginBottom = '8px';
-                  valuesDiv.style.fontSize = '0.9em';
-
-                  // Format the current value based on the active metric
-                  const currentValue = props[getMetricProperty()] || 0;
-                  const formattedValue = currentValue.toFixed(2);
-
-                  // Create a more informative display
-                  valuesDiv.innerHTML = `
-                    <div style="margin-bottom: 5px;">
-                      <strong>Current Value:</strong> ${formattedValue} ${activeMetric.includes('pop_weighted') ? 'person-µg/m³' : 'µg/m³'}
-                    </div>
-                    <div style="display: flex; margin-bottom: 3px;">
-                      <span>Total PM2.5:</span> 
-                      <span style="margin-left: 8px;">${(props.avg_total || 0).toFixed(2)} µg/m³</span>
-                    </div>
-                    <div style="display: flex; margin-bottom: 3px;">
-                      <span>Fire PM2.5:</span> 
-                      <span style="margin-left: 8px;">${(props.avg_fire || 0).toFixed(2)} µg/m³</span>
-                    </div>
-                    <div style="display: flex; margin-bottom: 3px;">
-                      <span>Non-fire PM2.5:</span> 
-                      <span style="margin-left: 8px;">${(props.avg_nonfire || 0).toFixed(2)} µg/m³</span>
-                    </div>
-                    ${activeMetric.includes('pop_weighted') ? `
-                    <div style="display: flex; margin-bottom: 3px;">
-                      <span>Pop-weighted Total:</span> 
-                      <span style="margin-left: 8px;">${(props.pop_weighted_total || 0).toLocaleString()} person-µg/m³</span>
-                    </div>
-                    <div style="display: flex; margin-bottom: 3px;">
-                      <span>Pop-weighted Fire:</span> 
-                      <span style="margin-left: 8px;">${(props.pop_weighted_fire || 0).toLocaleString()} person-µg/m³</span>
-                    </div>
-                    <div style="display: flex; margin-bottom: 3px;">
-                      <span>Pop-weighted Non-fire:</span> 
-                      <span style="margin-left: 8px;">${(props.pop_weighted_nonfire || 0).toLocaleString()} person-µg/m³</span>
-                    </div>
-                    ` : ''}
-                    ${props.population ? `
-                    <div style="margin-top: 8px; padding-top: 5px; border-top: 1px solid #eee;">
-                      <strong>Population:</strong> ${props.population.toLocaleString()}
-                    </div>` : ''}
-                  `;
-                  popupNode.appendChild(valuesDiv);
-
-                  // Render chart if data is available
-                  if (barChartData && barChartData.length > 0) {
-                    const chartDiv = document.createElement('div');
-                    // Calculate chart width based on time scale
-                    const chartWidth = timeScale === 'yearly' ? 350 :
-                      timeScale === 'monthly' ? Math.max(350, barChartData.length * 8) :
-                        Math.min(400, Math.max(350, barChartData.length * 5)); // Cap seasonal width at 400px
-
-                    chartDiv.style.width = `${chartWidth}px`;
-                    chartDiv.style.height = '180px';
-                    if (timeScale !== 'yearly') {
-                      chartDiv.style.overflowX = 'auto';
-                    }
-                    popupNode.appendChild(chartDiv);
-                    const root = createRoot(chartDiv);
-                    root.render(<CountyBarChart data={barChartData} timeScale={timeScale} />);
-                  }
-
-                  popup
-                    .setLngLat(e.lngLat)
-                    .setDOMContent(popupNode)
-                    .addTo(map.current);
-                } catch (err) {
-                  console.error('Error fetching bar chart data:', err);
-                  // Still show basic popup without chart
-                  const popupNode = document.createElement('div');
-                  const nameDiv = document.createElement('div');
-                  nameDiv.style.fontWeight = 'bold';
-                  nameDiv.style.fontSize = '1.1em';
-                  const stateAbbr = getStateFromFIPS(countyId);
-                  nameDiv.textContent = `${props.county_name || props.NAME || 'Unknown County'}, ${stateAbbr}`;
-                  popupNode.appendChild(nameDiv);
-
-                  const valueDiv = document.createElement('div');
-                  valueDiv.textContent = `${getMetricLabel()}: ${(props[getMetricProperty()] || 0).toFixed(2)} ${activeMetric.includes('pop_weighted') ? 'person-µg/m³' : 'µg/m³'}`;
-                  popupNode.appendChild(valueDiv);
-
-                  popup
-                    .setLngLat(e.lngLat)
-                    .setDOMContent(popupNode)
-                    .addTo(map.current);
-                }
-              } else {
-                // Same county, just update popup position
-                if (popup.isOpen()) {
-                  popup.setLngLat(e.lngLat);
-                }
-              }
-            } else {
-              // No county feature found, remove popup and reset state
-              if (currentCountyRef.current !== null) {
-                popup.remove();
-                map.current.getCanvas().style.cursor = '';
-                currentCountyRef.current = null;
-              }
-            }
-          });
-
-          // Change the cursor back to a pointer when it leaves the layer
-          map.current.on('mouseleave', 'pm25-layer', () => {
-            map.current.getCanvas().style.cursor = '';
-            popup.remove();
-            currentCountyRef.current = null;
-          });
-
-          // Also handle when mouse leaves the map entirely
-          map.current.on('mouseleave', () => {
-            popup.remove();
-            currentCountyRef.current = null;
-          });
-
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error('Error loading PM2.5 data:', err);
-        setError('Failed to load PM2.5 data');
-        setLoading(false);
-      }
-    });
-
     // Cleanup
     return () => {
       if (map.current) {
@@ -728,24 +505,31 @@ const Map = ({ mapboxToken, stateAbbr }) => {
           map.current.off('mouseleave', 'pm25-layer');
           map.current.off('mouseleave');
         }
-        if (popup.isOpen()) {
-          popup.remove();
-        }
+        if (popup.current) popup.current.remove();
         map.current.remove();
         map.current = null;
       }
     };
-  }, [mapboxToken, stateAbbr, timeScale, year, month, season]);
+  }, [mapboxToken, activeLayer, pm25SubLayer]);
 
   // Helper function to get color scale based on metric
   const getColorScale = (data = null) => {
     const metric = getMetricProperty();
-    // If we have data, calculate dynamic scale
+
+    // Handle health layers
+    if (activeLayer === 'mortality') {
+      return MORTALITY_COLORS;
+    }
+    if (activeLayer === 'population') {
+      return POPULATION_COLORS;
+    }
+
+    // If we have data, calculate dynamic scale for PM2.5 layers
     if (data) {
       return calculateDynamicColorScale(data, metric);
     }
 
-    // Fallback to static scales
+    // Fallback to static scales for PM2.5 layers
     if (metric.includes('pop_weighted')) {
       return POP_WEIGHTED_COLORS;
     } else if (metric.includes('fire') && !metric.includes('nonfire')) {
@@ -756,6 +540,13 @@ const Map = ({ mapboxToken, stateAbbr }) => {
 
   // Helper function to get metric label
   const getMetricLabel = (metric = getMetricProperty()) => {
+    if (activeLayer === 'mortality') {
+      return 'Excess Mortality (deaths/year)';
+    }
+    if (activeLayer === 'population') {
+      return 'Population';
+    }
+
     const labels = {
       'avg_total': 'Average Total PM2.5',
       'avg_fire': 'Average Fire PM2.5',
@@ -771,10 +562,16 @@ const Map = ({ mapboxToken, stateAbbr }) => {
 
   // Update map layers when choroplethData, activeMetric, or subMetric changes
   useEffect(() => {
-    if (!map.current || !choroplethData) return;
+    console.log('Map layer rendering useEffect triggered:', { activeLayer, choroplethData: !!choroplethData, mapLoaded: map.current?.isStyleLoaded() });
 
+    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer)) return;
+    if (!map.current || !choroplethData) return;
+    if (!map.current.isStyleLoaded()) return;
+
+    console.log('Rendering map layer for:', activeLayer);
     const mapInstance = map.current;
     const metricForColor = getMetricProperty();
+    console.log('Using metric for color:', metricForColor);
 
     // Remove the layer if it exists
     if (mapInstance.getLayer('pm25-layer')) {
@@ -810,13 +607,214 @@ const Map = ({ mapboxToken, stateAbbr }) => {
     // Update the legend
     updateLegend();
 
-  }, [choroplethData, activeMetric, subMetric]);
+  }, [choroplethData, activeLayer, timeScale, year, month, season]);
 
-  // Refetch choropleth data when main metric, time params, or subMetric change
+  // Update mousemove handler to send county info to sidebar
   useEffect(() => {
-    fetchChoroplethData();
-    // eslint-disable-next-line
-  }, [activeMetric, timeScale, year, month, season, subMetric]);
+    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer)) return;
+    if (!map.current) return;
+    const mapInstance = map.current;
+
+    // Named handler to avoid stale closures and duplicate handlers
+    const handleMouseMove = async (e) => {
+      const features = mapInstance.queryRenderedFeatures(e.point, { layers: ['pm25-layer'] });
+      if (features.length > 0) {
+        const feature = features[0];
+        const props = feature.properties;
+        const countyId = props.GEOID || props.FIPS || props.fips;
+        if (currentCountyRef.current !== countyId) {
+          if (popup.current) popup.current.remove();
+          currentCountyRef.current = countyId;
+          mapInstance.getCanvas().style.cursor = 'pointer';
+          let barChartData = [];
+          try {
+            if (PM25_LAYERS.includes(activeLayer)) {
+              barChartData = await fetchBarChartData(
+                countyId,
+                timeScale,
+                year,
+                month,
+                season
+              );
+            }
+          } catch (err) { }
+          const countyName = props.county_name || props.NAME || 'Unknown County';
+          const metricProperty = getMetricProperty();
+          const value = props[metricProperty] || 0;
+          const countyData = {
+            name: countyName,
+            value,
+            fips: countyId,
+            population: props.population,
+            avg_total: props.avg_total,
+            avg_fire: props.avg_fire,
+            avg_nonfire: props.avg_nonfire,
+            max_total: props.max_total,
+            max_fire: props.max_fire,
+            max_nonfire: props.max_nonfire,
+            pop_weighted_total: props.pop_weighted_total,
+            pop_weighted_fire: props.pop_weighted_fire,
+            pop_weighted_nonfire: props.pop_weighted_nonfire,
+            pm25: props.pm25,
+            y0: props.y0,
+            delta_mortality: props.delta_mortality,
+            barChartData,
+            timeScale,
+            year,
+            month,
+            season,
+            subMetric,
+            activeLayer
+          };
+          if (onCountyHover) onCountyHover(countyData);
+          if (popup.current) {
+            let formattedValue;
+            if (activeLayer === 'population') {
+              formattedValue = value !== undefined ? value.toLocaleString() : 'N/A';
+            } else if (typeof value === 'number' && Math.abs(value) >= 1000) {
+              formattedValue = value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            } else if (typeof value === 'number') {
+              formattedValue = value.toFixed(2);
+            } else {
+              formattedValue = 'N/A';
+            }
+            popup.current.setLngLat(e.lngLat)
+              .setHTML(`<div style='font-weight:bold;font-size:1.1em;'>${countyName}</div><div>Value: ${formattedValue}</div>`)
+              .addTo(mapInstance);
+          }
+        } else {
+          if (popup.current && popup.current.isOpen()) {
+            popup.current.setLngLat(e.lngLat);
+          }
+        }
+      } else {
+        if (popup.current) popup.current.remove();
+        mapInstance.getCanvas().style.cursor = '';
+        if (currentCountyRef.current !== null) {
+          currentCountyRef.current = null;
+          if (onCountyHover) onCountyHover(null);
+        }
+      }
+    };
+
+    // Click handler
+    const handleClick = async (e) => {
+      const features = mapInstance.queryRenderedFeatures(e.point, { layers: ['pm25-layer'] });
+      if (features.length > 0) {
+        const feature = features[0];
+        const props = feature.properties;
+        const countyId = props.GEOID || props.FIPS || props.fips;
+        const countyName = props.county_name || props.NAME || 'Unknown County';
+        const metricProperty = getMetricProperty();
+        const value = props[metricProperty] || 0;
+        
+        // Fetch bar chart data for selected county
+        let barChartData = [];
+        try {
+          if (PM25_LAYERS.includes(activeLayer)) {
+            barChartData = await fetchBarChartData(
+              countyId,
+              timeScale,
+              year,
+              month,
+              season
+            );
+          }
+        } catch (err) {
+          console.error('Error fetching bar chart data for selection:', err);
+        }
+        
+        const countyData = {
+          name: countyName,
+          value,
+          fips: countyId,
+          population: props.population,
+          avg_total: props.avg_total,
+          avg_fire: props.avg_fire,
+          avg_nonfire: props.avg_nonfire,
+          max_total: props.max_total,
+          max_fire: props.max_fire,
+          max_nonfire: props.max_nonfire,
+          pop_weighted_total: props.pop_weighted_total,
+          pop_weighted_fire: props.pop_weighted_fire,
+          pop_weighted_nonfire: props.pop_weighted_nonfire,
+          pm25: props.pm25,
+          y0: props.y0,
+          delta_mortality: props.delta_mortality,
+          barChartData,
+          timeScale,
+          year,
+          month,
+          season,
+          subMetric,
+          activeLayer
+        };
+        if (onCountySelect) onCountySelect(countyData);
+      } else {
+        if (onCountySelect) onCountySelect(null);
+      }
+    };
+
+    // Remove old handler, then add new one
+    mapInstance.off('mousemove', handleMouseMove);
+    mapInstance.on('mousemove', handleMouseMove);
+    mapInstance.off('mouseleave', 'pm25-layer');
+    mapInstance.on('mouseleave', 'pm25-layer', () => {
+      mapInstance.getCanvas().style.cursor = '';
+      if (popup.current) popup.current.remove();
+      currentCountyRef.current = null;
+      if (onCountyHover) onCountyHover(null);
+    });
+    mapInstance.off('mouseleave');
+    mapInstance.on('mouseleave', () => {
+      if (popup.current) popup.current.remove();
+      currentCountyRef.current = null;
+      if (onCountyHover) onCountyHover(null);
+    });
+    mapInstance.off('click', handleClick);
+    mapInstance.on('click', handleClick);
+    // Cleanup
+    return () => {
+      mapInstance.off('mousemove', handleMouseMove);
+      mapInstance.off('mouseleave', 'pm25-layer');
+      mapInstance.off('mouseleave');
+      mapInstance.off('click', handleClick);
+      if (popup.current) popup.current.remove();
+    };
+  }, [choroplethData, activeLayer, timeScale, year, month, season]);
+
+  // Highlight selected county outline
+  useEffect(() => {
+    if (!map.current || !choroplethData) return;
+    const mapInstance = map.current;
+    // Remove previous outline layer/source if exists
+    if (mapInstance.getLayer('selected-county-outline')) {
+      mapInstance.removeLayer('selected-county-outline');
+    }
+    if (mapInstance.getSource('selected-county-outline')) {
+      mapInstance.removeSource('selected-county-outline');
+    }
+    if (selectedCounty && selectedCounty.fips) {
+      // Find the feature for the selected county
+      const feature = choroplethData.features.find(f => f.properties.fips === selectedCounty.fips);
+      if (feature) {
+        mapInstance.addSource('selected-county-outline', {
+          type: 'geojson',
+          data: feature
+        });
+        mapInstance.addLayer({
+          id: 'selected-county-outline',
+          type: 'line',
+          source: 'selected-county-outline',
+          paint: {
+            'line-color': '#1976d2',
+            'line-width': 3,
+            'line-opacity': 1
+          }
+        });
+      }
+    }
+  }, [selectedCounty, choroplethData]);
 
   if (error) {
     return (
@@ -833,6 +831,14 @@ const Map = ({ mapboxToken, stateAbbr }) => {
     );
   }
 
+  if (PM25_LAYERS.includes(activeLayer) && !pm25SubLayer) {
+    return (
+      <div style={{ padding: 24, color: '#333', background: '#fff', height: '100%' }}>
+        <h3>Please select a PM2.5 sub-layer.</h3>
+      </div>
+    );
+  }
+
   return (
     <div style={{
       position: 'relative',
@@ -845,6 +851,7 @@ const Map = ({ mapboxToken, stateAbbr }) => {
       overflow: 'hidden'
     }}>
       <div
+        key={activeLayer + '-' + pm25SubLayer}
         ref={mapContainer}
         style={{
           position: 'absolute',
@@ -853,7 +860,9 @@ const Map = ({ mapboxToken, stateAbbr }) => {
           right: 0,
           bottom: 0,
           width: '100%',
-          height: '100%'
+          height: '100%',
+          minHeight: 300,
+          zIndex: 0
         }}
       />
 
@@ -869,249 +878,6 @@ const Map = ({ mapboxToken, stateAbbr }) => {
         zIndex: 1,
         width: '200px'
       }} />
-
-      {/* Time Controls */}
-      <div style={{
-        position: 'absolute',
-        top: '20px',
-        left: '20px',
-        backgroundColor: 'white',
-        padding: '15px',
-        borderRadius: '4px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-        zIndex: 1,
-        minWidth: '250px'
-      }}>
-        <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>Time Controls</div>
-
-        {/* Time Scale Selection */}
-        <div style={{ marginBottom: '10px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500' }}>Time Scale:</label>
-          <select
-            value={timeScale}
-            onChange={(e) => handleTimeScaleChange(e.target.value)}
-            style={{ width: '100%', padding: '5px' }}
-          >
-            <option value="yearly">Yearly</option>
-            <option value="monthly">Monthly</option>
-            <option value="seasonal">Seasonal</option>
-          </select>
-        </div>
-
-        {/* Year Selection */}
-        <div style={{ marginBottom: '10px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500' }}>Year:</label>
-          <select
-            value={year}
-            onChange={(e) => handleYearChange(parseInt(e.target.value))}
-            style={{ width: '100%', padding: '5px' }}
-          >
-            {Array.from({ length: 11 }, (_, i) => 2013 + i).map(y => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Month Selection (only for monthly time scale) */}
-        {timeScale === 'monthly' && (
-          <div style={{ marginBottom: '10px' }}>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500' }}>Month:</label>
-            <select
-              value={month}
-              onChange={(e) => handleMonthChange(parseInt(e.target.value))}
-              style={{ width: '100%', padding: '5px' }}
-            >
-              {['January', 'February', 'March', 'April', 'May', 'June',
-                'July', 'August', 'September', 'October', 'November', 'December']
-                .map((name, i) => (
-                  <option key={i + 1} value={i + 1}>{name}</option>
-                ))}
-            </select>
-          </div>
-        )}
-
-        {/* Season Selection (only for seasonal time scale) */}
-        {timeScale === 'seasonal' && (
-          <div style={{ marginBottom: '10px' }}>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: '500' }}>Season:</label>
-            <select
-              value={season}
-              onChange={(e) => handleSeasonChange(e.target.value)}
-              style={{ width: '100%', padding: '5px' }}
-            >
-              <option value="winter">Winter</option>
-              <option value="spring">Spring</option>
-              <option value="summer">Summer</option>
-              <option value="fall">Fall</option>
-            </select>
-          </div>
-        )}
-
-        <button
-          onClick={handleSubmit}
-          style={{
-            width: '100%',
-            padding: '8px',
-            backgroundColor: '#1976d2',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontWeight: 'bold'
-          }}
-          disabled={loading}
-        >
-          {loading ? 'Loading...' : 'Update Map'}
-        </button>
-
-        {pendingUpdate && (
-          <div style={{
-            marginTop: '8px',
-            fontSize: '0.8em',
-            color: '#666',
-            fontStyle: 'italic'
-          }}>
-            Changes pending. Click "Update Map" to apply.
-          </div>
-        )}
-      </div>
-
-      {/* Metric Selection */}
-      <div style={{
-        position: 'absolute',
-        top: '20px',
-        right: '20px',
-        backgroundColor: 'white',
-        padding: '15px',
-        borderRadius: '4px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-        zIndex: 1,
-        minWidth: '200px',
-        marginBottom: '10px'
-      }}>
-        <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>PM2.5 Metric</div>
-        <label style={{ display: 'block', marginBottom: '8px' }}>
-          <input
-            type="radio"
-            name="metric"
-            checked={activeMetric === 'average'}
-            onChange={() => {
-              setActiveMetric('average');
-              setSubMetric('total');
-            }}
-            style={{ marginRight: '8px' }}
-          />
-          Average
-        </label>
-        <label style={{ display: 'block', marginBottom: '8px' }}>
-          <input
-            type="radio"
-            name="metric"
-            checked={activeMetric === 'max'}
-            onChange={() => {
-              setActiveMetric('max');
-              setSubMetric('total');
-            }}
-            style={{ marginRight: '8px' }}
-          />
-          Maximum
-        </label>
-        <label style={{ display: 'block', marginBottom: '8px' }}>
-          <input
-            type="radio"
-            name="metric"
-            checked={activeMetric === 'pop_weighted'}
-            onChange={() => {
-              setActiveMetric('pop_weighted');
-              setSubMetric('total');
-            }}
-            style={{ marginRight: '8px' }}
-          />
-          Population-Weighted
-        </label>
-      </div>
-
-      {/* Sub-metric Selector Box */}
-      <div style={{
-        position: 'absolute',
-        top: '200px', // below the metric box
-        right: '20px',
-        backgroundColor: 'white',
-        padding: '15px',
-        borderRadius: '4px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-        zIndex: 1,
-        minWidth: '200px'
-      }}>
-        <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>PM 2.5 Type</div>
-        <label style={{ display: 'block', marginBottom: '4px' }}>
-          <input
-            type="radio"
-            name="subMetric"
-            checked={subMetric === 'total'}
-            onChange={() => setSubMetric('total')}
-            style={{ marginRight: '6px' }}
-          />
-          Total
-        </label>
-        <label style={{ display: 'block', marginBottom: '4px' }}>
-          <input
-            type="radio"
-            name="subMetric"
-            checked={subMetric === 'fire'}
-            onChange={() => setSubMetric('fire')}
-            style={{ marginRight: '6px' }}
-          />
-          Fire
-        </label>
-        <label style={{ display: 'block', marginBottom: '4px' }}>
-          <input
-            type="radio"
-            name="subMetric"
-            checked={subMetric === 'nonfire'}
-            onChange={() => setSubMetric('nonfire')}
-            style={{ marginRight: '6px' }}
-          />
-          Non-fire
-        </label>
-      </div>
-
-      {/* Legend */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: '20px',
-          right: '20px',
-          backgroundColor: 'white',
-          padding: '15px',
-          borderRadius: '4px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-          zIndex: 1,
-          minWidth: '180px'
-        }}
-      >
-        <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>
-          {getMetricLabel()} ({activeMetric.includes('pop_weighted') ? 'person-μg/m³' : 'μg/m³'})
-        </div>
-        {getColorScale(choroplethData).map(([value, color], i, arr) => {
-          const label = i === arr.length - 1
-            ? `${value.toLocaleString()}+`
-            : `${value.toLocaleString()} - ${arr[i + 1][0].toLocaleString()}`;
-
-          return (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
-              <div style={{
-                width: '20px',
-                height: '15px',
-                backgroundColor: color,
-                marginRight: '8px',
-                border: '1px solid #999'
-              }}></div>
-              <span style={{ fontSize: '0.9em' }}>{label}</span>
-            </div>
-          );
-        })}
-      </div>
 
       {loading && (
         <div style={{

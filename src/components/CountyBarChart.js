@@ -35,7 +35,7 @@ export default function CountyBarChart({ data, timeScale }) {
     const fireValue = Math.max(0, Number(item.fire) || 0);
     const nonFireValueNum = Math.max(0, Number(nonFireValue) || 0);
     const totalPM25 = fireValue + nonFireValueNum;
-    
+
     return {
       ...item,
       fire: fireValue,
@@ -124,7 +124,7 @@ export default function CountyBarChart({ data, timeScale }) {
 
   // Assign fill colors to each data point
   const isDailyChart = timeScale === 'monthly' || timeScale === 'seasonal';
-  
+
   if (isDailyChart) {
     // For daily charts (monthly/seasonal), use AQI-based colors with transparency
     chartData.forEach(d => {
@@ -192,16 +192,15 @@ export default function CountyBarChart({ data, timeScale }) {
   return (
     <div style={{
       width: containerWidth,
-      height: isDailyChart ? 280 : 210, // Increase height for daily charts to accommodate legend
       boxSizing: 'border-box',
       overflowX: timeScale !== 'yearly' && chartWidth > containerWidth ? 'auto' : 'visible'
     }}>
-      
+
       <BarChart
         width={chartWidth}
         height={180}
         data={chartData}
-        margin={{ top: 20, right: 40, left: 5, bottom: 20 }}
+        margin={{ top: 20, right: 60, left: 5, bottom: 0 }}
         barSize={barSize}
       >
         <CartesianGrid strokeDasharray="3 3" />
@@ -228,27 +227,27 @@ export default function CountyBarChart({ data, timeScale }) {
         <Tooltip content={<CustomTooltip />} />
         {/* Custom Legend */}
         {isDailyChart ? (
-          <Legend 
+          <Legend
             wrapperStyle={{ fontSize: 9 }}
             content={({ payload }) => (
-              <div style={{ textAlign: 'center', fontSize: 9, marginTop: 5 }}>
+              <div style={{ textAlign: 'center', fontSize: 9, marginTop: 0 }}>
                 <span style={{ marginRight: 15 }}>
-                  <span style={{ 
-                    display: 'inline-block', 
-                    width: 12, 
-                    height: 12, 
-                    backgroundColor: 'rgba(128,128,128,0.4)', 
+                  <span style={{
+                    display: 'inline-block',
+                    width: 12,
+                    height: 12,
+                    backgroundColor: 'rgba(128,128,128,0.4)',
                     marginRight: 4,
                     verticalAlign: 'middle'
                   }}></span>
                   Non-Fire PM2.5 (AQI Color)
                 </span>
                 <span>
-                  <span style={{ 
-                    display: 'inline-block', 
-                    width: 12, 
-                    height: 12, 
-                    backgroundColor: 'rgba(128,128,128,0.8)', 
+                  <span style={{
+                    display: 'inline-block',
+                    width: 12,
+                    height: 12,
+                    backgroundColor: 'rgba(128,128,128,0.8)',
                     marginRight: 4,
                     verticalAlign: 'middle'
                   }}></span>
@@ -324,29 +323,6 @@ export default function CountyBarChart({ data, timeScale }) {
           />
         )}
       </BarChart>
-      
-      {/* AQI Legend: only show for daily charts */}
-      {isDailyChart && (
-        <div style={{ 
-          marginTop: 8, 
-          fontSize: 10, 
-          border: '1px solid red',
-          padding: '5px',
-          backgroundColor: 'white',
-          position: 'relative',
-          zIndex: 1000
-        }}>
-          <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>AQI Legend:</div>
-          <div>
-            <span style={{ background: '#00e400', color: '#000', padding: '2px 4px', borderRadius: 3, marginRight: 4, display: 'inline-block' }}>Good</span>
-            <span style={{ background: '#ffff00', color: '#000', padding: '2px 4px', borderRadius: 3, marginRight: 4, display: 'inline-block' }}>Moderate</span>
-            <span style={{ background: '#ff7e00', color: '#fff', padding: '2px 4px', borderRadius: 3, marginRight: 4, display: 'inline-block' }}>Unhealthy for SG</span>
-            <span style={{ background: '#ff0000', color: '#fff', padding: '2px 4px', borderRadius: 3, marginRight: 4, display: 'inline-block' }}>Unhealthy</span>
-            <span style={{ background: '#8f3f97', color: '#fff', padding: '2px 4px', borderRadius: 3, marginRight: 4, display: 'inline-block' }}>Very Unhealthy</span>
-            <span style={{ background: '#7e0023', color: '#fff', padding: '2px 4px', borderRadius: 3, display: 'inline-block' }}>Hazardous</span>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
