@@ -9,8 +9,11 @@ from pathlib import Path
 import sys
 import json
 from typing import Optional
+from census import Census
+from us import states
+import os
 
-# Import your models and database
+# Import models and database
 from .models import (
     Base, County, DailyPM25, Population, Demographics,
     YearlyPM25Summary, MonthlyPM25Summary, SeasonalPM25Summary,
@@ -295,6 +298,116 @@ class DataLoader:
             
         except Exception as e:
             logger.error(f"Error loading population data: {e}")
+            self.db.rollback()
+            raise
+    
+    def load_population_data_api(self):
+        """Load population data for all US counties (2013–2023) by age group using Census API (ACS 5-year, table B01001)"""
+        api_key = os.getenv("CENSUS_API_KEY")
+        if not api_key:
+            logger.error("CENSUS_API_KEY is not set.")
+            return
+        c = Census(api_key)
+        years = range(2013, 2024)
+
+        # Age group mapping: group index -> [male_var, female_var, ...]
+        ACS_AGE_VARIABLES = {
+            1:  ['B01001_003E', 'B01001_027E'], # 0-4 years
+            2:  ['B01001_004E', 'B01001_028E'], # 5-9 years
+            3:  ['B01001_005E', 'B01001_029E'], # 10-14 years
+            4:  ['B01001_006E', 'B01001_007E', 'B01001_030E', 'B01001_031E'], # 15-19 years
+            5:  ['B01001_008E', 'B01001_009E', 'B01001_032E', 'B01001_033E'], # 20-24 years
+            6:  ['B01001_010E', 'B01001_034E'], # 25-29 years
+            7:  ['B01001_011E', 'B01001_035E'], # 30-34 years
+            8:  ['B01001_012E', 'B01001_036E'], # 35-39 years
+            9:  ['B01001_013E', 'B01001_037E'], # 40-44 years
+            10: ['B01001_014E', 'B01001_038E'], # 45-49 years
+            11: ['B01001_015E', 'B01001_039E'], # 50-54 years
+            12: ['B01001_016E', 'B01001_040E'], # 55-59 years
+            13: ['B01001_017E', 'B01001_018E', 'B01001_041E', 'B01001_042E'], # 60-64 years
+            14: ['B01001_019E', 'B01001_043E'], # 65-69 years
+            15: ['B01001_020E', 'B01001_044E'], # 70-74 years
+            16: ['B01001_021E', 'B01001_045E'], # 75-79 years
+            17: ['B01001_022E', 'B01001_046E'], # 80-84 years
+            18: ['B01001_023E', 'B01001_047E'], # 85+ years
+        }
+
+        def sum_age_group(row, var_list):
+            total = 0
+            for var in var_list:
+                val = row.get(var)
+                try:
+                    total += int(val) if val is not None else 0
+                except (ValueError, TypeError):
+                    logger.warning(f"Non-integer value for {var}: {val}")
+            return total
+
+        counties = {c.fips for c in self.db.query(County.fips).all()}
+        population_data = []
+        processed_count = 0
+        matched_count = 0
+        county_counter = 0
+        logger.info("Loading population data from Census API (ACS 5-year, B01001)...")
+        try:
+            for year in years:
+                logger.info(f"Loading population data for year {year}")
+                for state in states.STATES:
+                    try:
+                        all_vars = [v for sublist in ACS_AGE_VARIABLES.values() for v in sublist] + ['B01001_001E']
+                        result = c.acs5.get(all_vars + ['NAME'], geo={'for': 'county:*', 'in': f'state:{state.fips}'}, year=year)
+                        for row in result:
+                            fips = row['state'] + row['county']
+                            processed_count += 1
+                            if fips not in counties:
+                                logger.debug(f"Skipped county FIPS {fips} (not found in DB) for year {year}")
+                                continue
+                            county_counter += 1
+                            for group_index, var_list in ACS_AGE_VARIABLES.items():
+                                total = sum_age_group(row, var_list)
+                                try:
+                                    population_data.append(Population(
+                                        fips=fips,
+                                        year=year,
+                                        age_group=group_index,
+                                        population=total
+                                    ))
+                                    matched_count += 1
+                                except Exception as e:
+                                    logger.warning(f"Error creating Population record for {fips}, {year}, group {group_index}: {e}")
+                            # Add total population as age_group=0
+                            try:
+                                total_pop = int(row.get('B01001_001E', 0))
+                                population_data.append(Population(
+                                    fips=fips,
+                                    year=year,
+                                    age_group=0,  # Special index for total population
+                                    population=total_pop
+                                ))
+                                matched_count += 1
+                            except Exception as e:
+                                logger.warning(f"Error creating total Population record for {fips}, {year}: {e}")
+                            # Commit after every 100 counties
+                            if county_counter % 100 == 0:
+                                self.db.bulk_save_objects(population_data)
+                                self.db.commit()
+                                logger.info(f"Inserted batch of {len(population_data)} population records after {county_counter} counties...")
+                                population_data = []
+                    except Exception as e:
+                        logger.warning(f"Error fetching data for {state.name}, {year}: {e}")
+                        continue
+            # Insert any remaining records
+            if population_data:
+                self.db.bulk_save_objects(population_data)
+                self.db.commit()
+                logger.info(f"Inserted final batch of {len(population_data)} population records")
+            logger.info("Population data loaded from Census API.")
+            logger.info(f"  Total county-year rows processed: {processed_count}")
+            logger.info(f"  Population records inserted: {matched_count}")
+            # Verify insertion: 19 records per county per year (18 age groups + 1 total)
+            total_in_db = self.db.query(Population).count()
+            logger.info(f"Total population records in database: {total_in_db}")
+        except Exception as e:
+            logger.exception(f"Error loading population data from Census API: {e}")
             self.db.rollback()
             raise
 
@@ -649,8 +762,8 @@ def main():
             # Step 2: Load counties
             loader.load_counties()
             
-            # Step 3: Load population data
-            loader.load_population_data()
+            # Step 3: Load population data from API
+            loader.load_population_data_api()
             
             # Step 4: Load PM2.5 data (this will take the longest)
             loader.load_pm25_data()

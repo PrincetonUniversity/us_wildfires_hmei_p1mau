@@ -353,7 +353,8 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
         ).outerjoin(
             Population, and_(
                 Population.fips == summary_model.fips,
-                Population.year == year
+                Population.year == year,
+                Population.age_group == 0
             )
         ).filter(
             summary_model.year == year,
@@ -381,7 +382,8 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
         ).outerjoin(
             Population, and_(
                 Population.fips == summary_model.fips,
-                Population.year == year
+                Population.year == year,
+                Population.age_group == 0
             )
         ).filter(
             summary_model.year == year,
@@ -410,7 +412,8 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
         ).outerjoin(
             Population, and_(
                 Population.fips == summary_model.fips,
-                Population.year == year
+                Population.year == year,
+                Population.age_group == 0
             )
         ).filter(
             summary_model.year == year,
@@ -474,7 +477,8 @@ async def get_choropleth_mortality(
         ).outerjoin(  # Use LEFT JOIN for population
             Population, and_(
                 Population.fips == County.fips,
-                Population.year == year
+                Population.year == year,
+                Population.age_group == 0
             )
         ).outerjoin(  # Use LEFT JOIN for baseline mortality rate
             BaselineMortalityRate, and_(
@@ -682,7 +686,8 @@ async def get_choropleth_population(
         ).outerjoin(  # Use LEFT JOIN to include counties even if they don't have population data
             Population, and_(
                 Population.fips == County.fips,
-                Population.year == year
+                Population.year == year,
+                Population.age_group == 0  # Only total population
             )
         ).filter(
             ~County.fips.startswith('72')  # Exclude Puerto Rico
@@ -1035,7 +1040,8 @@ def get_mortality_impact(
         ).join(
             Population, and_(
                 Population.fips == YearlyPM25Summary.fips,
-                Population.year == YearlyPM25Summary.year
+                Population.year == YearlyPM25Summary.year,
+                Population.age_group == 0
             )
         ).join(
             BaselineMortalityRate, and_(

@@ -130,7 +130,7 @@ export default function CountyBarChart({ data, timeScale }) {
     chartData.forEach(d => {
       const aqiInfo = pm25ToAqiInfo(d.total);
       d.nonFireFill = hexToRgba(aqiInfo.color, 0.4); // 40% transparency for non-fire
-      d.fireFill = hexToRgba(aqiInfo.color, 0.8);     // 80% transparency for fire (darker)
+      d.fireFill = hexToRgba(aqiInfo.color, 1);     // 80% transparency for fire (darker)
     });
   } else {
     // For yearly charts, use original colors

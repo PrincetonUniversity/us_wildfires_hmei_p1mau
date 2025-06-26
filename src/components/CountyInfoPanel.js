@@ -116,19 +116,6 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
                 </button>
             )}
             <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ fontSize: '1.08em', mb: 0.5 }}>{name || 'County'}</Typography>
-            <Typography variant="body2" gutterBottom sx={{ fontSize: '0.97em', mb: 0.5 }}>
-                Current Value: {(() => {
-                    if (activeLayer === 'population') {
-                        return value !== undefined ? value.toLocaleString() : 'N/A';
-                    } else if (typeof value === 'number' && Math.abs(value) >= 1000) {
-                        return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                    } else if (typeof value === 'number') {
-                        return value.toFixed(2);
-                    } else {
-                        return 'N/A';
-                    }
-                })()}
-            </Typography>
             <Box sx={{ mb: 0.7 }}>
                 {renderRelevantMetrics()}
                 {activeLayer !== 'population' && population > 0 && (

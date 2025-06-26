@@ -153,9 +153,6 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
   // Destructure time controls
   const { timeScale, year, month, season } = timeControls;
 
-  // Debug: log current time controls on every render
-  console.log('Map.js time controls:', { timeScale, year, month, season });
-
   // Determine metric and subMetric from new props
   let metric = 'average';
   let subMetric = 'total';

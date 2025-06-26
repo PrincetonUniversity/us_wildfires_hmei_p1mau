@@ -82,11 +82,12 @@ class Population(Base):
     id = Column(Integer, primary_key=True)
     fips = Column(String, ForeignKey("counties.fips"))
     year = Column(Integer, index=True)
+    age_group = Column(Integer)
     population = Column(Integer)
 
     county = relationship("County", back_populates="populations")
 
-    __table_args__ = (UniqueConstraint("fips", "year", name="_fips_year_uc"),)
+    __table_args__ = (UniqueConstraint("fips", "year", "age_group", name="_fips_year_age_uc"),)
 
 class Demographics(Base):
     __tablename__ = "demographics"
