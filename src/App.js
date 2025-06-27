@@ -3,6 +3,7 @@ import { Box, Container, CssBaseline, Typography } from '@mui/material';
 import Map from './components/Map';
 import Sidebar from './components/Sidebar';
 import CountyBarChart from './components/CountyBarChart';
+import './styles/style.css';
 
 const PM25_LAYERS = ['average', 'max', 'pop_weighted'];
 const HEALTH_LAYERS = ['mortality', 'population'];

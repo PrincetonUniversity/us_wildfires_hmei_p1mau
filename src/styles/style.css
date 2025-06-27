@@ -1,0 +1,138 @@
+:root {
+    --background: #f7f8fa;
+    --sidebar-bg: #fff;
+    --sidebar-shadow: 0 2px 12px rgba(0, 0, 0, 0.07);
+    --card-bg: #fff;
+    --card-border: #e0e4ea;
+    --text: #222;
+    --accent: #1976d2;
+    --accent-hover: #1565c0;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+    background: var(--background);
+    color: var(--text);
+    font-size: 16px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.container {
+    display: flex;
+    min-height: 100vh;
+    background: var(--background);
+}
+
+.sidebar {
+    width: 320px;
+    background: var(--sidebar-bg);
+    box-shadow: var(--sidebar-shadow);
+    border-radius: 0 12px 12px 0;
+    padding: 28px 24px 24px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+#map {
+    flex: 1;
+    height: 100%;
+}
+
+h1 {
+    color: var(--accent);
+    margin-bottom: 18px;
+    font-size: 1.7em;
+    font-weight: 700;
+    letter-spacing: -1px;
+}
+
+.controls {
+    margin-bottom: 18px;
+    display: flex;
+    gap: 10px;
+}
+
+select,
+button {
+    padding: 9px 16px;
+    border-radius: 5px;
+    border: 1px solid #ddd;
+    font-size: 1em;
+    background: #f7f8fa;
+    color: var(--text);
+    transition: background 0.2s, color 0.2s, border 0.2s;
+}
+
+button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+button:hover,
+button:focus {
+    background: var(--accent-hover);
+    outline: none;
+}
+
+select:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+.card,
+.legend {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
+    padding: 18px;
+    margin-bottom: 16px;
+    transition: background 0.2s, color 0.2s, border 0.2s;
+}
+
+.color-scale {
+    height: 20px;
+    background: linear-gradient(to right, #00e400, #ffff00, #ff0000);
+    margin-top: 10px;
+    border-radius: 4px;
+}
+
+/* Material-UI header styles */
+.MuiBox-root[component="header"],
+.header-mui {
+    background: #1976d2 !important;
+    color: #fff !important;
+    padding: 18px 0 14px 0 !important;
+    box-shadow: 0 2px 8px rgba(25, 118, 210, 0.08);
+    width: 100%;
+    margin-bottom: 0;
+    display: flex;
+    align-items: left;
+    justify-content: left;
+    margin-left: 18px;
+}
+
+.MuiTypography-h4,
+.MuiTypography-root[component="h1"] {
+    color: #fff !important;
+    font-size: 2.1em !important;
+    font-weight: 700 !important;
+    letter-spacing: -1px;
+    margin: 0 !important;
+    margin-left: 1px;
+    text-align: left;
+}
+
+/* Ensure Container doesn't shrink the header */
+.MuiContainer-root {
+    width: 100% !important;
+    max-width: 100vw !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+}
