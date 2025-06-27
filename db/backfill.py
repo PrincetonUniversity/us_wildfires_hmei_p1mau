@@ -1,15 +1,15 @@
 from db.load_data import DataLoader
-from db.models import Population
+from db.models import ExcessMortalitySummary
 
 def main():
     print("Backfilling new data...")
     with DataLoader() as loader:
-        # Clear the Population table before backfilling
-        print("Clearing Population table...")
-        loader.db.query(Population).delete()
+        # Clear the table before backfilling
+        print("Clearing table...")
+        loader.db.query(ExcessMortalitySummary).delete()
         loader.db.commit()
-        print("Population table cleared.")
-        loader.load_population_data_api()
+        print("Table cleared.")
+        loader.excess_mortality_summary()
     print("Done! All tables updated.")
 
 if __name__ == "__main__":

@@ -1,0 +1,116 @@
+import React from "react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList } from "recharts";
+
+const COLORS = {
+    nonFire: "#90caf9", // blue
+    fire: "#ffb74d",    // orange
+};
+
+export default function CountyMortalityBarChart({ data, timeScale = 'yearly' }) {
+    // Format data
+    const formattedData = data.map(item => {
+        const fire = Math.max(0, Number(item.fire) || 0);
+        const nonFire = Math.max(0, Number(item.nonFire) || 0);
+        return {
+            ...item,
+            fire,
+            nonFire,
+            total: fire + nonFire,
+            label: item.year ? item.year.toString() : item.label
+        };
+    });
+
+    // Sort by year
+    const chartData = [...formattedData].sort((a, b) => (a.year || 0) - (b.year || 0));
+    const maxValue = Math.max(10, ...chartData.map(d => d.total));
+    const tickStep = Math.max(1, Math.ceil(maxValue / 6));
+    const ticks = [];
+    for (let t = 0; t <= maxValue; t += tickStep) ticks.push(t);
+
+    // Tooltip
+    const CustomTooltip = ({ active, payload, label }) => {
+        if (active && payload && payload.length) {
+            const total = (payload[0].value + payload[1].value).toFixed(1);
+            return (
+                <div style={{ backgroundColor: 'white', padding: 8, border: '1px solid #ccc', borderRadius: 4, fontSize: 12 }}>
+                    <p style={{ margin: 0, fontWeight: 'bold' }}>Year {label}</p>
+                    <p style={{ margin: 0, color: COLORS.fire }}>Fire-attributed: {payload[1].value.toFixed(1)} deaths/year</p>
+                    <p style={{ margin: 0, color: COLORS.nonFire }}>Non-fire: {payload[0].value.toFixed(1)} deaths/year</p>
+                    <p style={{ margin: 0, fontWeight: 'bold' }}>Total: {total} deaths/year</p>
+                </div>
+            );
+        }
+        return null;
+    };
+
+    return (
+        <div style={{ width: 420, boxSizing: 'border-box' }}>
+            <BarChart
+                width={350}
+                height={180}
+                data={chartData}
+                margin={{ top: 20, right: 60, left: 5, bottom: 0 }}
+                barSize={20}
+            >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                    dataKey="label"
+                    interval={0}
+                    tick={{ fontSize: 9 }}
+                    height={30}
+                    tickFormatter={(label, index) => {
+                        // Only show every 2 years (even years)
+                        const year = parseInt(label, 10);
+                        return year % 2 === 0 ? label : '';
+                    }}
+                />
+                <YAxis
+                    domain={[0, maxValue]}
+                    ticks={ticks}
+                    tick={{ fontSize: 9 }}
+                    width={35}
+                    label={{
+                        value: 'Excess Mortality (deaths/year)',
+                        angle: -90,
+                        position: 'insideLeft',
+                        style: { textAnchor: 'middle', fontSize: 9 },
+                        offset: 0
+                    }}
+                />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 9 }} />
+                <Bar
+                    dataKey="nonFire"
+                    stackId="a"
+                    name="Non-fire"
+                    fill={COLORS.nonFire}
+                />
+                <Bar
+                    dataKey="fire"
+                    stackId="a"
+                    name="Fire-attributed"
+                    fill={COLORS.fire}
+                >
+                    <LabelList
+                        content={({ x, y, width, index }) => {
+                            const dataPoint = chartData[index];
+                            const total = dataPoint.fire + dataPoint.nonFire;
+                            return (
+                                <text
+                                    x={x + width / 2}
+                                    y={y - 5}
+                                    fill="#666"
+                                    textAnchor="middle"
+                                    fontSize={9}
+                                >
+                                    {total.toFixed(1)}
+                                </text>
+                            );
+                        }}
+                        position="top"
+                    />
+                </Bar>
+            </BarChart>
+        </div>
+    );
+} 

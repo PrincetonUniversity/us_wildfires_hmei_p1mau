@@ -15,9 +15,9 @@ import os
 
 # Import models and database
 from .models import (
-    Base, County, DailyPM25, Population, Demographics,
+    Base, County, DailyPM25, Population,
     YearlyPM25Summary, MonthlyPM25Summary, SeasonalPM25Summary,
-    AnnualHealthMetric, BaselineMortalityRate
+    BaselineMortalityRate, ExcessMortalitySummary
 )
 from .database import engine, SessionLocal
 
@@ -750,6 +750,86 @@ class DataLoader:
             logger.error(f"Error during data validation: {e}")
             raise
 
+    def excess_mortality_summary(self):
+        """Compute and store total, fire, and nonfire excess mortality for each county-year in ExcessMortalitySummary."""
+        logger.info("Computing excess mortality summary for all counties/years...")
+        # GEMM parameters (Burnett et al. 2018, NCD+LRI)
+        theta = 0.268
+        alpha = 30.0
+        mu = 15.0
+        tau = 0.5
+        r = 50.0
+        def omega(z):
+            return 1 / (1 + np.exp(-(z - mu) / (tau * r)))
+        def HR(z):
+            return np.exp(theta * np.log(1 + z / alpha) * omega(z))
+        # Preload PM2.5 summaries
+        yearly_map = {(y.fips, y.year): y for y in self.db.query(YearlyPM25Summary).all()}
+        # Preload population by age group
+        pop_map = {}
+        for row in self.db.query(Population).filter(Population.age_group != 0):
+            pop_map.setdefault((row.fips, row.year), {})[row.age_group] = row.population
+        # Preload baseline rates for NCD and RI
+        basemor_map = {}
+        for row in self.db.query(BaselineMortalityRate).filter(BaselineMortalityRate.source.in_(['basemor_NCD', 'basemor_RI'])):
+            key = (row.fips, row.year, row.age_group)
+            basemor_map.setdefault(key, 0)
+            basemor_map[key] += row.value
+        # Compute and store
+        self.db.query(ExcessMortalitySummary).delete()
+        to_insert = []
+        for (fips, year), age_dict in pop_map.items():
+            yearly = yearly_map.get((fips, year))
+            if not yearly:
+                continue
+            pm25 = yearly.avg_total
+            pm25_fire = yearly.avg_fire
+            pm25_nonfire = yearly.avg_nonfire
+            z = max(0, pm25 - 2.4)
+            total_excess = 0
+            for age_group, pop in age_dict.items():
+                y0 = basemor_map.get((fips, year, age_group), 0)
+                if pop is None or y0 is None or pop == 0 or y0 == 0:
+                    continue
+                hr = HR(z)
+                excess = pop * y0 * (1 - 1/hr)
+                if not np.isfinite(excess):
+                    excess = 0.0
+                total_excess += excess
+            # Clamp total_excess to >= 0
+            total_excess = max(0.0, total_excess)
+            # Clamp pm25_fire and pm25_nonfire to >= 0
+            pm25_fire_clamped = max(0.0, pm25_fire)
+            pm25_nonfire_clamped = max(0.0, pm25_nonfire)
+            denom = pm25_fire_clamped + pm25_nonfire_clamped
+            if denom > 0:
+                fire_frac = pm25_fire_clamped / denom
+                nonfire_frac = pm25_nonfire_clamped / denom
+            else:
+                fire_frac = 0.0
+                nonfire_frac = 0.0
+            fire_excess = total_excess * fire_frac
+            nonfire_excess = total_excess * nonfire_frac
+            total_pop = int(sum(age_dict.values()))
+            to_insert.append(ExcessMortalitySummary(
+                fips=fips,
+                year=year,
+                total_excess=total_excess,
+                fire_excess=fire_excess,
+                nonfire_excess=nonfire_excess,
+                population=total_pop
+            ))
+            if len(to_insert) >= 1000:
+                self.db.bulk_save_objects(to_insert)
+                self.db.commit()
+                logger.info(f"Inserted batch of {len(to_insert)} excess mortality summary records...")
+                to_insert = []
+        if to_insert:
+            self.db.bulk_save_objects(to_insert)
+            self.db.commit()
+            logger.info(f"Inserted final batch of {len(to_insert)} excess mortality summary records.")
+        logger.info("Excess mortality summary computation complete.")
+
 def main():
     """Main function to load all data"""
     logger.info("=== Starting Data Loading Process ===")
@@ -774,7 +854,10 @@ def main():
             # Step 6: Generate aggregations
             loader.preprocess_aggregations()
             
-            # Step 7: Validate data
+            # Step 7: Compute and store excess mortality summary
+            loader.excess_mortality_summary()
+            
+            # Step 8: Validate data
             loader.validate_data()
             
         logger.info("=== Data Loading Process Completed Successfully ===")

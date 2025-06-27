@@ -2,6 +2,7 @@ import React from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import CountyBarChart from './CountyBarChart';
+import CountyMortalityBarChart from './CountyMortalityBarChart';
 
 const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
     if (!selectedCounty) {
@@ -34,7 +35,10 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
         month,
         season,
         subMetric,
-        activeLayer
+        activeLayer,
+        total_excess,
+        fire_excess,
+        nonfire_excess
     } = selectedCounty;
 
     const isBarChartDataForCurrentTimeScale = () => {
@@ -74,7 +78,13 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
         } else if (activeLayer === 'mortality') {
             return <>
                 <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
-                    Excess Mortality: {value !== undefined ? value.toFixed(1) : 'N/A'} deaths/year
+                    Total Excess Mortality: {total_excess !== undefined ? total_excess.toFixed(1) : 'N/A'} deaths/year
+                </Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
+                    Excess from Fire-attributed PM2.5: {fire_excess !== undefined ? fire_excess.toFixed(1) : 'N/A'} deaths/year
+                </Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
+                    Excess from Non-fire PM2.5: {nonfire_excess !== undefined ? nonfire_excess.toFixed(1) : 'N/A'} deaths/year
                 </Typography>
                 {selectedCounty.pm25 !== undefined && (
                     <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
@@ -115,24 +125,28 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
                     ×
                 </button>
             )}
-            <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ fontSize: '1.08em', mb: 0.5 }}>{name || 'County'}</Typography>
-            <Box sx={{ mb: 0.7 }}>
-                {renderRelevantMetrics()}
+            <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ fontSize: '1.08em', mb: 0.25 }}>{name || 'County'}</Typography>
+            <Box sx={{ mb: 0.5 }}>
                 {activeLayer !== 'population' && population > 0 && (
                     <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.93em' }}><strong>Population:</strong> {population.toLocaleString()}</Typography>
                 )}
+                {renderRelevantMetrics()}
             </Box>
             {isBarChartDataForCurrentTimeScale() && (
                 <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea' }}>
                     <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: '1em', mb: 0.5 }}>
-                        PM2.5 Bar Chart
+                        {activeLayer === 'mortality' ? 'Excess Mortality Bar Chart' : 'PM2.5 Bar Chart'}
                         <span style={{ fontWeight: 'normal', fontSize: '0.8em', color: '#888', marginLeft: 8 }}>
                             [{barChartData[0]?.displayType}] {barChartData.length} pts
                         </span>
                     </Typography>
-                    <CountyBarChart key={timeScale} data={barChartData} timeScale={timeScale} />
+                    {activeLayer === 'mortality' ? (
+                        <CountyMortalityBarChart data={barChartData} timeScale="yearly" />
+                    ) : (
+                        <CountyBarChart key={timeScale} data={barChartData} timeScale={timeScale} />
+                    )}
                     {/* AQI Legend: only for monthly/seasonal (daily) charts, with no gap */}
-                    {timeScale !== 'yearly' && (
+                    {activeLayer !== 'mortality' && timeScale !== 'yearly' && (
                         <Box sx={{ mt: 0, pt: 1, fontSize: '0.97em', width: '100%' }}>
                             <div style={{ fontWeight: 'bold', margin: 0, padding: 0 }}>AQI Legend:</div>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: 0, padding: 0 }}>

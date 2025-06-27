@@ -15,7 +15,6 @@ class County(Base):
 
     pm25_data = relationship("DailyPM25", back_populates="county")
     populations = relationship("Population", back_populates="county")
-    demographics = relationship("Demographics", back_populates="county")
     yearly_summaries = relationship("YearlyPM25Summary", back_populates="county")
     monthly_summaries = relationship("MonthlyPM25Summary", back_populates="county")
     seasonal_summaries = relationship("SeasonalPM25Summary", back_populates="county")
@@ -32,9 +31,7 @@ class DailyPM25(Base):
     fire = Column(Float, nullable=False)    # Fire-related PM2.5
     nonfire = Column(Float, nullable=False)  # Non-fire PM2.5
     
-    __table_args__ = (
-        UniqueConstraint("fips", "date", name="_fips_date_uc"),
-    )
+    __table_args__ = (UniqueConstraint("fips", "date", name="_fips_date_uc"),)
 
     county = relationship("County", back_populates="pm25_data")
 
@@ -88,18 +85,6 @@ class Population(Base):
     county = relationship("County", back_populates="populations")
 
     __table_args__ = (UniqueConstraint("fips", "year", "age_group", name="_fips_year_age_uc"),)
-
-class Demographics(Base):
-    __tablename__ = "demographics"
-
-    id = Column(Integer, primary_key=True)
-    fips = Column(String, ForeignKey("counties.fips"))
-    metric = Column(String)
-    value = Column(Float)
-
-    county = relationship("County", back_populates="demographics")
-
-    __table_args__ = (UniqueConstraint("fips", "metric", name="_fips_metric_uc"),)
 
 class YearlyPM25Summary(Base):
     __tablename__ = "yearly_pm25_summary"
@@ -171,28 +156,36 @@ class SeasonalPM25Summary(Base):
     
     county = relationship("County", back_populates="seasonal_summaries")
 
-class AnnualHealthMetric(Base):
-    __tablename__ = "annual_health_metric"
+class ExcessMortalitySummary(Base):
+    __tablename__ = "excess_mortality_summary"
+
     id = Column(Integer, primary_key=True)
-    fips = Column(String, ForeignKey("counties.fips"), index=True)
-    year = Column(Integer, index=True)
-    metric_name = Column(String)
-    value = Column(Float)
-    county = relationship("County")
-    __table_args__ = (UniqueConstraint("fips", "year", "metric_name", name="_fips_year_metric_uc"),)
+    fips = Column(String, ForeignKey("counties.fips"))
+
+    year = Column(Integer)
+    total_excess = Column(Float)
+    fire_excess = Column(Float)
+    nonfire_excess = Column(Float)
+    population = Column(Integer)
+
+    __table_args__ = (UniqueConstraint("fips", "year", name="_fips_year_uc"),)
 
 class BaselineMortalityRate(Base):
     __tablename__ = "baseline_mortality_rate"
+
     id = Column(Integer, primary_key=True)
     fips = Column(String, ForeignKey("counties.fips"), index=True)
     county_index = Column(Integer, index=True)
+
     year = Column(Integer, index=True)
     age_group = Column(Integer)
     stat_type = Column(String)  # 'mean', 'upper', 'lower'
     value = Column(Float)
     source = Column(String)
     allage_flag = Column(Boolean)
+
     county = relationship("County", back_populates="baseline_mortality_rates")
+
     __table_args__ = (
         UniqueConstraint("fips", "year", "age_group", "stat_type", "source", name="_unique_mortality_entry"),
     )

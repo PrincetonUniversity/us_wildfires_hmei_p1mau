@@ -56,6 +56,13 @@ const LayerTimeControls = ({
     ];
     const seasons = ['winter', 'spring', 'summer', 'fall'];
 
+    // Health sub-options for mortality
+    const mortalitySubOptions = [
+        { value: 'total', label: 'Total' },
+        { value: 'fire', label: 'Fire' },
+        { value: 'nonfire', label: 'Non-fire' },
+    ];
+
     return (
         <Box sx={{ p: 0.5 }}>
             {/* PM2.5 Section */}
@@ -142,6 +149,32 @@ const LayerTimeControls = ({
                         </Button>
                     ))}
                 </ButtonGroup>
+                {/* Mortality sub-metric selector */}
+                {activeLayer === 'mortality' && (
+                    <Box sx={{ ml: 0, mt: 0.7 }}>
+                        <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
+                            {mortalitySubOptions.map(subOpt => (
+                                <Button
+                                    key={subOpt.value}
+                                    size="small"
+                                    sx={{
+                                        ...pillStyle,
+                                        bgcolor: (timeControls.subMetric || 'total') === subOpt.value ? 'secondary.main' : 'white',
+                                        color: (timeControls.subMetric || 'total') === subOpt.value ? 'white' : 'secondary.main',
+                                        borderColor: 'secondary.main',
+                                        '&:hover': {
+                                            bgcolor: (timeControls.subMetric || 'total') === subOpt.value ? 'secondary.dark' : 'secondary.light',
+                                            color: 'white'
+                                        }
+                                    }}
+                                    onClick={() => setTimeControls({ ...timeControls, subMetric: subOpt.value })}
+                                >
+                                    {subOpt.label}
+                                </Button>
+                            ))}
+                        </ButtonGroup>
+                    </Box>
+                )}
             </Box>
             {/* Time Controls Section */}
             <Box sx={{ mt: 0.5, display: 'flex', flexDirection: 'column', gap: 0.7 }}>

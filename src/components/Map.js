@@ -160,9 +160,12 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     metric = activeLayer;
     if (pm25SubLayer) subMetric = pm25SubLayer;
   } else if (HEALTH_LAYERS.includes(activeLayer)) {
-    // For health layers, set appropriate defaults
     metric = activeLayer;
-    subMetric = 'total'; // Default for health layers
+    if (activeLayer === 'mortality') {
+      subMetric = timeControls.subMetric || 'total';
+    } else {
+      subMetric = 'total';
+    }
   }
 
   // Fetch choropleth data when mapRefreshKey or any relevant prop changes
@@ -192,7 +195,8 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
           if (activeLayer === 'mortality') {
             endpoint = '/api/counties/choropleth/mortality';
             params.append('year', year.toString());
-            console.log('Fetching mortality data for year:', year);
+            params.append('sub_metric', subMetric);
+            console.log('Fetching mortality data for year:', year, 'sub_metric:', subMetric);
           } else if (activeLayer === 'population') {
             endpoint = '/api/counties/choropleth/population';
             params.append('year', year.toString());
@@ -282,7 +286,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
   // Helper to get the property name for the current metric and sub-metric
   const getMetricProperty = () => {
     if (activeLayer === 'mortality') {
-      return 'delta_mortality';
+      return 'value';
     }
     if (activeLayer === 'population') {
       return 'population';
@@ -465,6 +469,29 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     }
   };
 
+  // Function to fetch mortality bar chart data for a specific county
+  const fetchMortalityBarChartData = async (fips) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/excess_mortality?fips=${fips}`);
+      if (!response.ok) return [];
+      const data = await response.json();
+      // Only keep years 2013-2023, sort by year
+      return data
+        .filter(d => d.year >= 2013 && d.year <= 2023)
+        .sort((a, b) => a.year - b.year)
+        .map(d => ({
+          year: d.year,
+          label: d.year.toString(),
+          fire: d.fire_excess || 0,
+          nonFire: d.nonfire_excess || 0,
+          total: (d.fire_excess || 0) + (d.nonfire_excess || 0),
+          displayType: 'yearly',
+        }));
+    } catch {
+      return [];
+    }
+  };
+
   // Initialize map when component mounts
   useEffect(() => {
     console.log('Map initialization useEffect triggered:', { activeLayer, pm25SubLayer, PM25_LAYERS: PM25_LAYERS.includes(activeLayer), HEALTH_LAYERS: HEALTH_LAYERS.includes(activeLayer) });
@@ -633,6 +660,8 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
                 month,
                 season
               );
+            } else if (activeLayer === 'mortality') {
+              barChartData = await fetchMortalityBarChartData(countyId);
             }
           } catch (err) { }
           const countyName = props.county_name || props.NAME || 'Unknown County';
@@ -655,6 +684,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
             pm25: props.pm25,
             y0: props.y0,
             delta_mortality: props.delta_mortality,
+            total_excess: props.total_excess,
+            fire_excess: props.fire_excess,
+            nonfire_excess: props.nonfire_excess,
             barChartData,
             timeScale,
             year,
@@ -704,7 +736,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
         const countyName = props.county_name || props.NAME || 'Unknown County';
         const metricProperty = getMetricProperty();
         const value = props[metricProperty] || 0;
-        
+
         // Fetch bar chart data for selected county
         let barChartData = [];
         try {
@@ -716,11 +748,13 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
               month,
               season
             );
+          } else if (activeLayer === 'mortality') {
+            barChartData = await fetchMortalityBarChartData(countyId);
           }
         } catch (err) {
           console.error('Error fetching bar chart data for selection:', err);
         }
-        
+
         const countyData = {
           name: countyName,
           value,
@@ -738,6 +772,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
           pm25: props.pm25,
           y0: props.y0,
           delta_mortality: props.delta_mortality,
+          total_excess: props.total_excess,
+          fire_excess: props.fire_excess,
+          nonfire_excess: props.nonfire_excess,
           barChartData,
           timeScale,
           year,

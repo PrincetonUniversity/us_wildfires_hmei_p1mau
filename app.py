@@ -20,9 +20,9 @@ import math
 # Application imports
 from db.database import SessionLocal, engine, Base
 from db.models import (
-    DailyPM25, County, Population, Demographics,
+    DailyPM25, County, Population,
     YearlyPM25Summary, MonthlyPM25Summary, SeasonalPM25Summary,
-    BaselineMortalityRate
+    BaselineMortalityRate, ExcessMortalitySummary
 )
 
 import geopandas as gpd
@@ -454,101 +454,73 @@ def build_geojson_features(results, value_func):
 # --- New Modular Endpoints ---
 choropleth_router = APIRouter(prefix="/api/counties/choropleth", tags=["Choropleth"])
 
+# Add a helper to sanitize float values for JSON
+def safe_float(val):
+    if val is None or not math.isfinite(val):
+        return 0.0
+    return float(val)
+
 @choropleth_router.get("/mortality")
 async def get_choropleth_mortality(
     year: int = Query(..., description="Year required for mortality data"),
+    sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$", description="Which excess mortality to return: total, fire, or nonfire"),
     db: Session = Depends(get_db)
 ):
-    """Get mortality impact choropleth data."""
+    """Get mortality impact choropleth data (precomputed summary, total/fire/nonfire)."""
     try:
-        # Build query for mortality data using LEFT JOINs to handle missing data
         query = db.query(
             County.fips,
             County.name.label("county_name"),
             County.geometry,
-            YearlyPM25Summary.avg_total.label("pm25"),
-            Population.population,
-            func.avg(BaselineMortalityRate.value).label("y0_avg")
+            ExcessMortalitySummary.total_excess,
+            ExcessMortalitySummary.fire_excess,
+            ExcessMortalitySummary.nonfire_excess,
+            ExcessMortalitySummary.population
         ).join(
-            YearlyPM25Summary, and_(
-                YearlyPM25Summary.fips == County.fips,
-                YearlyPM25Summary.year == year
-            )
-        ).outerjoin(  # Use LEFT JOIN for population
-            Population, and_(
-                Population.fips == County.fips,
-                Population.year == year,
-                Population.age_group == 0
-            )
-        ).outerjoin(  # Use LEFT JOIN for baseline mortality rate
-            BaselineMortalityRate, and_(
-                BaselineMortalityRate.fips == County.fips,
-                BaselineMortalityRate.year == year,
-                BaselineMortalityRate.stat_type == '1',
-                BaselineMortalityRate.source == 'basemor_ALL'
+            ExcessMortalitySummary, and_(
+                ExcessMortalitySummary.fips == County.fips,
+                ExcessMortalitySummary.year == year
             )
         ).filter(
-            ~County.fips.startswith('72')  # Exclude Puerto Rico
-        ).group_by(
-            County.fips,
-            County.name,
-            County.geometry,
-            YearlyPM25Summary.avg_total,
-            Population.population
+            ~County.fips.startswith('72')
         )
-        
         results = query.all()
         features = []
-        
-        beta = 0.0058  # GEMM coefficient
-        
         for row in results:
             if not row.geometry:
                 continue
-                
-            pm25 = row.pm25 or 0
-            pop = row.population or 0
-            y0 = row.y0_avg or 0
-            
-            # Ensure all are valid numbers
-            if pm25 is None or not math.isfinite(pm25):
-                pm25 = 0
-            if pop is None or not math.isfinite(pop):
-                pop = 0
-            if y0 is None or not math.isfinite(y0):
-                y0 = 0
-            
-            # Calculate excess mortality
-            delta_mortality = pop * y0 * (np.exp(beta * pm25) - 1)
-            if not math.isfinite(delta_mortality):
-                delta_mortality = 0
-            
+            if sub_metric == "total":
+                value = row.total_excess
+            elif sub_metric == "fire":
+                value = row.fire_excess
+            elif sub_metric == "nonfire":
+                value = row.nonfire_excess
+            else:
+                value = row.total_excess
             feature = {
                 "type": "Feature",
                 "geometry": row.geometry,
                 "properties": {
                     "fips": row.fips,
                     "county_name": row.county_name,
-                    "value": float(delta_mortality),
-                    "pm25": float(pm25),
-                    "population": int(pop),
-                    "y0": float(y0),
-                    "delta_mortality": float(delta_mortality)
+                    "value": float(value) if value is not None else 0.0,
+                    "total_excess": float(row.total_excess) if row.total_excess is not None else 0.0,
+                    "fire_excess": float(row.fire_excess) if row.fire_excess is not None else 0.0,
+                    "nonfire_excess": float(row.nonfire_excess) if row.nonfire_excess is not None else 0.0,
+                    "population": int(row.population) if row.population is not None else 0
                 }
             }
             features.append(feature)
-        
         return {
             "type": "FeatureCollection",
             "features": features,
             "metadata": {
                 "time_scale": "yearly",
                 "year": year,
-                "metric": "mortality",
+                "metric": f"excess_mortality_{sub_metric}",
                 "feature_count": len(features)
             }
         }
-        
     except Exception as e:
         logger.error(f"Error in mortality choropleth: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -1014,86 +986,45 @@ async def get_county_statistics(
         logger.error(f"Error in statistics: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/mortality_impact")
-def get_mortality_impact(
+@app.get("/api/excess_mortality")
+def get_excess_mortality_summary(
     year: int = Query(None, description="Year to filter (optional)"),
     fips: str = Query(None, description="County FIPS code to filter (optional)"),
+    sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$", description="Which excess mortality to return: total, fire, or nonfire"),
     db: Session = Depends(get_db)
 ):
     """
-    Compute GEMM-based excess mortality for each county-year using:
-    ΔMortality = Population × y₀ × (exp(β × PM₂.₅) - 1)
-    Joins yearly_pm25_summary, population, and baseline_mortality_rate.
+    Return precomputed excess mortality summary (total, fire, nonfire) for each county-year.
     """
-    beta = 0.0058
     try:
-        # Build base query
-        query = db.query(
-            YearlyPM25Summary.fips,
-            County.name.label("county_name"),
-            YearlyPM25Summary.year,
-            YearlyPM25Summary.avg_total.label("pm25"),
-            Population.population,
-            func.avg(BaselineMortalityRate.value).label("y0_avg")
-        ).join(
-            County, County.fips == YearlyPM25Summary.fips
-        ).join(
-            Population, and_(
-                Population.fips == YearlyPM25Summary.fips,
-                Population.year == YearlyPM25Summary.year,
-                Population.age_group == 0
-            )
-        ).join(
-            BaselineMortalityRate, and_(
-                BaselineMortalityRate.fips == YearlyPM25Summary.fips,
-                BaselineMortalityRate.year == YearlyPM25Summary.year,
-                BaselineMortalityRate.stat_type == '1',
-                BaselineMortalityRate.source == 'basemor_ALL'
-            )
-        ).group_by(
-            YearlyPM25Summary.fips,
-            County.name,
-            YearlyPM25Summary.year,
-            YearlyPM25Summary.avg_total,
-            Population.population
-        )
-
+        query = db.query(ExcessMortalitySummary, County.name).join(County, County.fips == ExcessMortalitySummary.fips)
         if year:
-            query = query.filter(YearlyPM25Summary.year == year)
+            query = query.filter(ExcessMortalitySummary.year == year)
         if fips:
-            query = query.filter(YearlyPM25Summary.fips == fips)
-
+            query = query.filter(ExcessMortalitySummary.fips == fips)
         results = []
-        for row in query.all():
-            pm25 = row.pm25 or 0
-            pop = row.population or 0
-            y0 = row.y0_avg or 0
-
-            # Ensure all are valid numbers
-            if pm25 is None or not math.isfinite(pm25):
-                pm25 = 0
-            if pop is None or not math.isfinite(pop):
-                pop = 0
-            if y0 is None or not math.isfinite(y0):
-                y0 = 0
-
-            delta_mortality = pop * y0 * (np.exp(beta * pm25) - 1)
-            if not math.isfinite(delta_mortality):
-                delta_mortality = 0
-
+        for row, county_name in query.all():
+            if sub_metric == "total":
+                value = row.total_excess
+            elif sub_metric == "fire":
+                value = row.fire_excess
+            elif sub_metric == "nonfire":
+                value = row.nonfire_excess
+            else:
+                value = row.total_excess
             results.append({
                 "fips": row.fips,
-                "county_name": row.county_name,
+                "county_name": county_name,
                 "year": row.year,
-                "pm25": pm25,
-                "population": pop,
-                "y0": y0,
-                "delta_mortality": delta_mortality
+                "population": int(row.population) if row.population is not None else 0,
+                "excess_mortality": float(value) if value is not None else 0.0,
+                "total_excess": float(row.total_excess) if row.total_excess is not None else 0.0,
+                "fire_excess": float(row.fire_excess) if row.fire_excess is not None else 0.0,
+                "nonfire_excess": float(row.nonfire_excess) if row.nonfire_excess is not None else 0.0
             })
         return results
     except Exception as e:
-        print(e)
-        logger.error(f"Error in health impact endpoint: {e}", exc_info=True)
+        logger.error(f"Error in excess mortality summary endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Health check endpoint
