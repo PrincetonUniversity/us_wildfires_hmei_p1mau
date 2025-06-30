@@ -78,7 +78,7 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
         } else if (activeLayer === 'mortality') {
             return <>
                 <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
-                    Total Excess Mortality: {total_excess !== undefined ? total_excess.toFixed(1) : 'N/A'} deaths/year
+                    Excess Mortality (% of Population): {value !== undefined ? value.toFixed(3) + '%' : 'N/A'}
                 </Typography>
                 <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
                     Excess from Fire-attributed PM2.5: {fire_excess !== undefined ? fire_excess.toFixed(1) : 'N/A'} deaths/year
@@ -86,16 +86,6 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
                 <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
                     Excess from Non-fire PM2.5: {nonfire_excess !== undefined ? nonfire_excess.toFixed(1) : 'N/A'} deaths/year
                 </Typography>
-                {selectedCounty.pm25 !== undefined && (
-                    <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
-                        PM2.5 Level: {selectedCounty.pm25.toFixed(2)} µg/m³
-                    </Typography>
-                )}
-                {selectedCounty.y0 !== undefined && (
-                    <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
-                        Baseline Mortality Rate: {selectedCounty.y0.toFixed(4)}
-                    </Typography>
-                )}
             </>;
         } else if (activeLayer === 'population') {
             return <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Population: {population !== undefined ? population.toLocaleString() : 'N/A'}</Typography>;

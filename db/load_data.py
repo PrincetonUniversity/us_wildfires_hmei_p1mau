@@ -754,16 +754,36 @@ class DataLoader:
         """Compute and store total, fire, and nonfire excess mortality for each county-year in ExcessMortalitySummary."""
         logger.info("Computing excess mortality summary for all counties/years...")
         # GEMM parameters (Burnett et al. 2018, NCD+LRI)
-        theta = 0.268
-        alpha = 30.0
-        mu = 15.0
-        tau = 0.5
-        r = 50.0
+        theta = 0.140 # diff based on age group
+        theta_age = {
+            1:  0.1430, # 0-4 years
+            2:  0.1430, # 5-9 years
+            3:  0.1430, # 10-14 years
+            4:  0.1430, # 15-19 years
+            5:  0.1430, # 20-24 years
+            6:  0.1585, # 25-29 years
+            7:  0.1577, # 30-34 years
+            8:  0.1570, # 35-39 years
+            9:  0.1558, # 40-44 years
+            10: 0.1532, # 45-49 years
+            11: 0.1499, # 50-54 years
+            12: 0.1462, # 55-59 years
+            13: 0.1421, # 60-64 years
+            14: 0.1374, # 65-69 years
+            15: 0.1319, # 70-74 years
+            16: 0.1253, # 75-79 years
+            17: 0.1141, # 80-84 years (est)
+            18: 0.1141, # 85+ years
+        }
+        alpha = 1.6
+        mu = 15.5
+        nu = 36.8
         def omega(z):
-            return 1 / (1 + np.exp(-(z - mu) / (tau * r)))
-        def HR(z):
-            return np.exp(theta * np.log(1 + z / alpha) * omega(z))
+            return 1 / (1 + np.exp(-(z - mu) / (nu)))
+        def HR(z, age_group):
+            return np.exp(theta_age[age_group] * np.log(1 + z / alpha) * omega(z))
         # Preload PM2.5 summaries
+        logger.info("Preloading yearly PM2.5 summaries, population, and mortality...")
         yearly_map = {(y.fips, y.year): y for y in self.db.query(YearlyPM25Summary).all()}
         # Preload population by age group
         pop_map = {}
@@ -775,6 +795,7 @@ class DataLoader:
             key = (row.fips, row.year, row.age_group)
             basemor_map.setdefault(key, 0)
             basemor_map[key] += row.value
+        logger.info("Computing excess mortality summary...")
         # Compute and store
         self.db.query(ExcessMortalitySummary).delete()
         to_insert = []
@@ -791,7 +812,7 @@ class DataLoader:
                 y0 = basemor_map.get((fips, year, age_group), 0)
                 if pop is None or y0 is None or pop == 0 or y0 == 0:
                     continue
-                hr = HR(z)
+                hr = HR(z, age_group)
                 excess = pop * y0 * (1 - 1/hr)
                 if not np.isfinite(excess):
                     excess = 0.0

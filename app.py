@@ -490,20 +490,25 @@ async def get_choropleth_mortality(
             if not row.geometry:
                 continue
             if sub_metric == "total":
-                value = row.total_excess
+                excess = row.total_excess
             elif sub_metric == "fire":
-                value = row.fire_excess
+                excess = row.fire_excess
             elif sub_metric == "nonfire":
-                value = row.nonfire_excess
+                excess = row.nonfire_excess
             else:
-                value = row.total_excess
+                excess = row.total_excess
+            population = row.population or 0
+            if population > 0:
+                value = (float(excess) / population) * 100
+            else:
+                value = 0.0
             feature = {
                 "type": "Feature",
                 "geometry": row.geometry,
                 "properties": {
                     "fips": row.fips,
                     "county_name": row.county_name,
-                    "value": float(value) if value is not None else 0.0,
+                    "value": value,
                     "total_excess": float(row.total_excess) if row.total_excess is not None else 0.0,
                     "fire_excess": float(row.fire_excess) if row.fire_excess is not None else 0.0,
                     "nonfire_excess": float(row.nonfire_excess) if row.nonfire_excess is not None else 0.0,
@@ -1031,9 +1036,6 @@ def get_excess_mortality_summary(
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
-
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 async def read_root():

@@ -44,12 +44,12 @@ const POP_WEIGHTED_COLORS = [
 
 // Color scale for mortality values (light red to dark red)
 const MORTALITY_COLORS = [
-  [0, '#fee5d9'],      // very light red
-  [10, '#fcae91'],     // light red
-  [25, '#fb6a4a'],     // red
-  [50, '#de2d26'],     // dark red
-  [100, '#a50f15'],    // very dark red
-  [200, '#67000d']     // darkest red
+  [0.0, '#fee5d9'],      // very light red
+  [0.1, '#fcae91'],     // light red
+  [0.2, '#fb6a4a'],     // red
+  [0.3, '#de2d26'],     // dark red
+  [0.4, '#a50f15'],    // very dark red
+  [0.5, '#67000d']     // darkest red
 ];
 
 // State FIPS to abbreviation mapping
@@ -275,9 +275,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     labels.style.justifyContent = 'space-between';
     labels.style.fontSize = '0.8em';
     const minLabel = document.createElement('span');
-    minLabel.textContent = colorScale[0][0].toFixed(1);
+    minLabel.textContent = (activeLayer === 'mortality') ? colorScale[0][0].toFixed(3) + '%' : colorScale[0][0].toFixed(1);
     const maxLabel = document.createElement('span');
-    maxLabel.textContent = `${colorScale[colorScale.length - 1][0].toFixed(1)}+`;
+    maxLabel.textContent = (activeLayer === 'mortality') ? `${colorScale[colorScale.length - 1][0].toFixed(3)}%+` : `${colorScale[colorScale.length - 1][0].toFixed(1)}+`;
     labels.appendChild(minLabel);
     labels.appendChild(maxLabel);
     legend.appendChild(labels);
@@ -565,7 +565,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
   // Helper function to get metric label
   const getMetricLabel = (metric = getMetricProperty()) => {
     if (activeLayer === 'mortality') {
-      return 'Excess Mortality (deaths/year)';
+      return 'Excess Mortality (% of Population)';
     }
     if (activeLayer === 'population') {
       return 'Population';
@@ -700,6 +700,8 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
             let formattedValue;
             if (activeLayer === 'population') {
               formattedValue = value !== undefined ? value.toLocaleString() : 'N/A';
+            } else if (activeLayer === 'mortality') {
+              formattedValue = (typeof value === 'number') ? value.toFixed(3) + '%' : 'N/A';
             } else if (typeof value === 'number' && Math.abs(value) >= 1000) {
               formattedValue = value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             } else if (typeof value === 'number') {
