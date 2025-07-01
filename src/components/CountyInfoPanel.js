@@ -123,7 +123,7 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
                 {renderRelevantMetrics()}
             </Box>
             {isBarChartDataForCurrentTimeScale() && (
-                <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea' }}>
+                <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
                     <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: '1em', mb: 0.5 }}>
                         {activeLayer === 'mortality' ? 'Excess Mortality Bar Chart' : 'PM2.5 Bar Chart'}
                         <span style={{ fontWeight: 'normal', fontSize: '0.8em', color: '#888', marginLeft: 8 }}>
@@ -134,20 +134,6 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
                         <CountyMortalityBarChart data={barChartData} timeScale="yearly" />
                     ) : (
                         <CountyBarChart key={timeScale} data={barChartData} timeScale={timeScale} />
-                    )}
-                    {/* AQI Legend: only for monthly/seasonal (daily) charts, with no gap */}
-                    {activeLayer !== 'mortality' && timeScale !== 'yearly' && (
-                        <Box sx={{ mt: 0, pt: 1, fontSize: '0.97em', width: '100%' }}>
-                            <div style={{ fontWeight: 'bold', margin: 0, padding: 0 }}>AQI Legend:</div>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: 0, padding: 0 }}>
-                                <span style={{ background: '#00e400', color: '#000', padding: '2px 6px', borderRadius: 3, marginRight: 3 }}>Good</span>
-                                <span style={{ background: '#ffff00', color: '#000', padding: '2px 6px', borderRadius: 3, marginRight: 3 }}>Moderate</span>
-                                <span style={{ background: '#ff7e00', color: '#fff', padding: '2px 6px', borderRadius: 3, marginRight: 3 }}>Unhealthy for SG</span>
-                                <span style={{ background: '#ff0000', color: '#fff', padding: '2px 6px', borderRadius: 3, marginRight: 3 }}>Unhealthy</span>
-                                <span style={{ background: '#8f3f97', color: '#fff', padding: '2px 6px', borderRadius: 3, marginRight: 3 }}>Very Unhealthy</span>
-                                <span style={{ background: '#7e0023', color: '#fff', padding: '2px 6px', borderRadius: 3 }}>Hazardous</span>
-                            </div>
-                        </Box>
                     )}
                 </Box>
             )}

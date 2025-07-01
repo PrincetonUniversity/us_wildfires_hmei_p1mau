@@ -19,7 +19,7 @@ const Sidebar = ({
     return (
         <Box
             sx={{
-                width: 450,
+                width: 500,
                 height: '100vh',
                 display: 'flex',
                 flexDirection: 'column',
@@ -34,7 +34,7 @@ const Sidebar = ({
         >
             {/* Layer and Time Controls (moved from Map.js) */}
             <Paper elevation={0} sx={{
-                flex: '0 0 40%',
+                flex: '0 0 auto',
                 borderBottom: '1.5px solid #e0e4ea',
                 borderRadius: 0,
                 boxShadow: 'none',
@@ -59,7 +59,8 @@ const Sidebar = ({
             </Paper>
             {/* Bottom: County Info */}
             <Box sx={{
-                flex: '1 1 60%',
+                flex: '1 1 auto',
+                minHeight: 0,
                 overflowY: 'auto',
                 p: 2,
                 background: 'rgba(255,255,255,0.85)',
