@@ -28,7 +28,8 @@ const LayerTimeControls = ({
     pm25SubLayer,
     setPm25SubLayer,
     timeControls,
-    setTimeControls
+    setTimeControls,
+    showTimeControls
 }) => {
     // PM2.5 main options
     const pm25Options = [
@@ -63,120 +64,9 @@ const LayerTimeControls = ({
         { value: 'nonfire', label: 'Non-fire' },
     ];
 
-    return (
-        <Box sx={{ p: 0.5 }}>
-            {/* PM2.5 Section */}
-            <Box sx={{ mb: 1.1 }}>
-                <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.4, fontSize: '0.98em' }}>
-                    PM2.5 Metrics
-                </Typography>
-                {/* PM2.5 Main Layer Buttons with Sub-layers */}
-                <Box sx={{ mb: 0.4 }}>
-                    <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
-                        {pm25Options.map(opt => (
-                            <Button
-                                key={opt.value}
-                                size="small"
-                                sx={{
-                                    ...pillStyle,
-                                    bgcolor: activeLayer === opt.value ? 'primary.main' : 'white',
-                                    color: activeLayer === opt.value ? 'white' : 'primary.main',
-                                    borderColor: 'primary.main',
-                                    '&:hover': {
-                                        bgcolor: activeLayer === opt.value ? 'primary.dark' : 'primary.light',
-                                        color: 'white'
-                                    }
-                                }}
-                                onClick={() => {
-                                    setActiveLayer(opt.value);
-                                    setPm25SubLayer(pm25SubLayer || 'total');
-                                }}
-                            >
-                                {opt.label}
-                            </Button>
-                        ))}
-                    </ButtonGroup>
-                    {/* Sub-layer buttons (only show if a PM2.5 layer is active) */}
-                    {PM25_LAYERS.includes(activeLayer) && (
-                        <Box sx={{ ml: 0, mt: 0.3 }}>
-                            <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
-                                {pm25SubOptions.map(subOpt => (
-                                    <Button
-                                        key={subOpt.value}
-                                        size="small"
-                                        sx={{
-                                            ...pillStyle,
-                                            bgcolor: pm25SubLayer === subOpt.value ? 'primary.main' : 'white',
-                                            color: pm25SubLayer === subOpt.value ? 'white' : 'primary.main',
-                                            borderColor: 'primary.main',
-                                            '&:hover': {
-                                                bgcolor: pm25SubLayer === subOpt.value ? 'primary.dark' : 'primary.light',
-                                                color: 'white'
-                                            }
-                                        }}
-                                        onClick={() => setPm25SubLayer(subOpt.value)}
-                                    >
-                                        {subOpt.label}
-                                    </Button>
-                                ))}
-                            </ButtonGroup>
-                        </Box>
-                    )}
-                </Box>
-            </Box>
-            {/* Health/Demographic Section */}
-            <Box sx={{ mb: 1.1 }}>
-                <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.4, fontSize: '0.98em' }}>
-                    Health / Demographic
-                </Typography>
-                <ButtonGroup variant="outlined" sx={{ flexWrap: 'wrap' }}>
-                    {healthOptions.map(opt => (
-                        <Button
-                            key={opt.value}
-                            sx={{
-                                ...pillStyle,
-                                bgcolor: activeLayer === opt.value ? 'secondary.main' : 'white',
-                                color: activeLayer === opt.value ? 'white' : 'secondary.main',
-                                borderColor: 'secondary.main',
-                                '&:hover': {
-                                    bgcolor: activeLayer === opt.value ? 'secondary.dark' : 'secondary.light',
-                                    color: 'white'
-                                }
-                            }}
-                            onClick={() => setActiveLayer(opt.value)}
-                        >
-                            {opt.label}
-                        </Button>
-                    ))}
-                </ButtonGroup>
-                {/* Mortality sub-metric selector */}
-                {activeLayer === 'mortality' && (
-                    <Box sx={{ ml: 0, mt: 0.7 }}>
-                        <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
-                            {mortalitySubOptions.map(subOpt => (
-                                <Button
-                                    key={subOpt.value}
-                                    size="small"
-                                    sx={{
-                                        ...pillStyle,
-                                        bgcolor: (timeControls.subMetric || 'total') === subOpt.value ? 'secondary.main' : 'white',
-                                        color: (timeControls.subMetric || 'total') === subOpt.value ? 'white' : 'secondary.main',
-                                        borderColor: 'secondary.main',
-                                        '&:hover': {
-                                            bgcolor: (timeControls.subMetric || 'total') === subOpt.value ? 'secondary.dark' : 'secondary.light',
-                                            color: 'white'
-                                        }
-                                    }}
-                                    onClick={() => setTimeControls({ ...timeControls, subMetric: subOpt.value })}
-                                >
-                                    {subOpt.label}
-                                </Button>
-                            ))}
-                        </ButtonGroup>
-                    </Box>
-                )}
-            </Box>
-            {/* Time Controls Section */}
+    if (showTimeControls === true) {
+        // Only render the time controls section
+        return (
             <Box sx={{ mt: 0.5, display: 'flex', flexDirection: 'column', gap: 0.7 }}>
                 <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.2, fontSize: '0.98em' }}>
                     Time Controls
@@ -266,7 +156,150 @@ const LayerTimeControls = ({
                     </>
                 )}
             </Box>
-        </Box>
+        );
+    }
+    if (showTimeControls === false) {
+        // Only render the layer and sub-metric controls
+        return (
+            <>
+                {/* PM2.5 Section */}
+                <Box sx={{ mb: 1.1 }}>
+                    <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.4, fontSize: '0.98em' }}>
+                        PM2.5 Metrics
+                    </Typography>
+                    {/* PM2.5 Main Layer Buttons with Sub-layers */}
+                    <Box sx={{ mb: 0.4 }}>
+                        <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
+                            {pm25Options.map(opt => (
+                                <Button
+                                    key={opt.value}
+                                    size="small"
+                                    sx={{
+                                        ...pillStyle,
+                                        bgcolor: activeLayer === opt.value ? 'primary.main' : 'white',
+                                        color: activeLayer === opt.value ? 'white' : 'primary.main',
+                                        borderColor: 'primary.main',
+                                        '&:hover': {
+                                            bgcolor: activeLayer === opt.value ? 'primary.dark' : 'primary.light',
+                                            color: 'white'
+                                        }
+                                    }}
+                                    onClick={() => {
+                                        setActiveLayer(opt.value);
+                                        setPm25SubLayer(pm25SubLayer || 'total');
+                                    }}
+                                >
+                                    {opt.label}
+                                </Button>
+                            ))}
+                        </ButtonGroup>
+                        {/* Sub-layer buttons (only show if a PM2.5 layer is active) */}
+                        {PM25_LAYERS.includes(activeLayer) && (
+                            <Box sx={{ ml: 0, mt: 0.3 }}>
+                                <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
+                                    {pm25SubOptions.map(subOpt => (
+                                        <Button
+                                            key={subOpt.value}
+                                            size="small"
+                                            sx={{
+                                                ...pillStyle,
+                                                bgcolor: pm25SubLayer === subOpt.value ? 'primary.main' : 'white',
+                                                color: pm25SubLayer === subOpt.value ? 'white' : 'primary.main',
+                                                borderColor: 'primary.main',
+                                                '&:hover': {
+                                                    bgcolor: pm25SubLayer === subOpt.value ? 'primary.dark' : 'primary.light',
+                                                    color: 'white'
+                                                }
+                                            }}
+                                            onClick={() => setPm25SubLayer(subOpt.value)}
+                                        >
+                                            {subOpt.label}
+                                        </Button>
+                                    ))}
+                                </ButtonGroup>
+                            </Box>
+                        )}
+                    </Box>
+                </Box>
+                {/* Health/Demographic Section */}
+                <Box sx={{ mb: 1.1 }}>
+                    <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.4, fontSize: '0.98em' }}>
+                        Health / Demographic
+                    </Typography>
+                    <ButtonGroup variant="outlined" sx={{ flexWrap: 'wrap' }}>
+                        {healthOptions.map(opt => (
+                            <Button
+                                key={opt.value}
+                                sx={{
+                                    ...pillStyle,
+                                    bgcolor: activeLayer === opt.value ? 'secondary.main' : 'white',
+                                    color: activeLayer === opt.value ? 'white' : 'secondary.main',
+                                    borderColor: 'secondary.main',
+                                    '&:hover': {
+                                        bgcolor: activeLayer === opt.value ? 'secondary.dark' : 'secondary.light',
+                                        color: 'white'
+                                    }
+                                }}
+                                onClick={() => setActiveLayer(opt.value)}
+                            >
+                                {opt.label}
+                            </Button>
+                        ))}
+                    </ButtonGroup>
+                    {/* Mortality sub-metric selector */}
+                    {activeLayer === 'mortality' && (
+                        <Box sx={{ ml: 0, mt: 0.7 }}>
+                            <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
+                                {mortalitySubOptions.map(subOpt => (
+                                    <Button
+                                        key={subOpt.value}
+                                        size="small"
+                                        sx={{
+                                            ...pillStyle,
+                                            bgcolor: (timeControls.subMetric || 'total') === subOpt.value ? 'secondary.main' : 'white',
+                                            color: (timeControls.subMetric || 'total') === subOpt.value ? 'white' : 'secondary.main',
+                                            borderColor: 'secondary.main',
+                                            '&:hover': {
+                                                bgcolor: (timeControls.subMetric || 'total') === subOpt.value ? 'secondary.dark' : 'secondary.light',
+                                                color: 'white'
+                                            }
+                                        }}
+                                        onClick={() => setTimeControls({ ...timeControls, subMetric: subOpt.value })}
+                                    >
+                                        {subOpt.label}
+                                    </Button>
+                                ))}
+                            </ButtonGroup>
+                        </Box>
+                    )}
+                </Box>
+            </>
+        );
+    }
+    // Default: render both
+    return (
+        <>
+            {/* Layer and sub-metric controls only */}
+            <LayerTimeControls
+                activeLayer={activeLayer}
+                setActiveLayer={setActiveLayer}
+                pm25SubLayer={pm25SubLayer}
+                setPm25SubLayer={setPm25SubLayer}
+                timeControls={timeControls}
+                setTimeControls={setTimeControls}
+                showTimeControls={false}
+            />
+            {/* Time controls only */}
+            <LayerTimeControls
+                activeLayer={activeLayer}
+                setActiveLayer={setActiveLayer}
+                pm25SubLayer={pm25SubLayer}
+                setPm25SubLayer={setPm25SubLayer}
+                timeControls={timeControls}
+                setTimeControls={setTimeControls}
+                showTimeControls={true}
+            />
+        </>
     );
 };
 

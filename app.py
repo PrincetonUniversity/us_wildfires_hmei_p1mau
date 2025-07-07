@@ -464,18 +464,20 @@ def safe_float(val):
 async def get_choropleth_mortality(
     year: int = Query(..., description="Year required for mortality data"),
     sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$", description="Which excess mortality to return: total, fire, or nonfire"),
+    age_group: Optional[str] = Query(None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
     db: Session = Depends(get_db)
 ):
-    """Get mortality impact choropleth data (precomputed summary, total/fire/nonfire)."""
+    """Get mortality impact choropleth data (precomputed summary, total/fire/nonfire), optionally by age group(s)."""
     try:
-        query = db.query(
+        base_query = db.query(
             County.fips,
             County.name.label("county_name"),
             County.geometry,
             ExcessMortalitySummary.total_excess,
             ExcessMortalitySummary.fire_excess,
             ExcessMortalitySummary.nonfire_excess,
-            ExcessMortalitySummary.population
+            ExcessMortalitySummary.population,
+            ExcessMortalitySummary.age_group
         ).join(
             ExcessMortalitySummary, and_(
                 ExcessMortalitySummary.fips == County.fips,
@@ -484,7 +486,50 @@ async def get_choropleth_mortality(
         ).filter(
             ~County.fips.startswith('72')
         )
-        results = query.all()
+        age_group_list = None
+        if age_group is not None and age_group.strip() != '':
+            age_group_list = [int(x) for x in age_group.split(',') if x.strip().isdigit()]
+        if age_group_list:
+            # Sum over selected age groups for each county
+            subq = db.query(
+                ExcessMortalitySummary.fips,
+                func.sum(ExcessMortalitySummary.total_excess).label("total_excess"),
+                func.sum(ExcessMortalitySummary.fire_excess).label("fire_excess"),
+                func.sum(ExcessMortalitySummary.nonfire_excess).label("nonfire_excess"),
+                func.sum(ExcessMortalitySummary.population).label("population")
+            ).filter(
+                ExcessMortalitySummary.year == year,
+                ExcessMortalitySummary.age_group.in_(age_group_list)
+            ).group_by(ExcessMortalitySummary.fips).subquery()
+            results = db.query(
+                County.fips,
+                County.name.label("county_name"),
+                County.geometry,
+                subq.c.total_excess,
+                subq.c.fire_excess,
+                subq.c.nonfire_excess,
+                subq.c.population
+            ).join(subq, subq.c.fips == County.fips).filter(~County.fips.startswith('72')).all()
+        else:
+            # Sum over all age groups for each county-year
+            subq = db.query(
+                ExcessMortalitySummary.fips,
+                func.sum(ExcessMortalitySummary.total_excess).label("total_excess"),
+                func.sum(ExcessMortalitySummary.fire_excess).label("fire_excess"),
+                func.sum(ExcessMortalitySummary.nonfire_excess).label("nonfire_excess"),
+                func.sum(ExcessMortalitySummary.population).label("population")
+            ).filter(
+                ExcessMortalitySummary.year == year
+            ).group_by(ExcessMortalitySummary.fips).subquery()
+            results = db.query(
+                County.fips,
+                County.name.label("county_name"),
+                County.geometry,
+                subq.c.total_excess,
+                subq.c.fire_excess,
+                subq.c.nonfire_excess,
+                subq.c.population
+            ).join(subq, subq.c.fips == County.fips).filter(~County.fips.startswith('72')).all()
         features = []
         for row in results:
             if not row.geometry:
@@ -523,7 +568,8 @@ async def get_choropleth_mortality(
                 "time_scale": "yearly",
                 "year": year,
                 "metric": f"excess_mortality_{sub_metric}",
-                "feature_count": len(features)
+                "feature_count": len(features),
+                "age_group": age_group
             }
         }
     except Exception as e:
@@ -996,17 +1042,57 @@ def get_excess_mortality_summary(
     year: int = Query(None, description="Year to filter (optional)"),
     fips: str = Query(None, description="County FIPS code to filter (optional)"),
     sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$", description="Which excess mortality to return: total, fire, or nonfire"),
+    age_group: Optional[str] = Query(None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
     db: Session = Depends(get_db)
 ):
     """
-    Return precomputed excess mortality summary (total, fire, nonfire) for each county-year.
+    Return precomputed excess mortality summary (total, fire, nonfire) for each county-year-age_group. If age_group is not provided, return all age groups for the county-year.
     """
     try:
+        age_group_list = None
+        if age_group is not None and age_group.strip() != '':
+            age_group_list = [int(x) for x in age_group.split(',') if x.strip().isdigit()]
+        # If fips is provided, group by year and sum over age groups
+        if fips:
+            query = db.query(
+                ExcessMortalitySummary.year,
+                func.sum(ExcessMortalitySummary.total_excess).label("total_excess"),
+                func.sum(ExcessMortalitySummary.fire_excess).label("fire_excess"),
+                func.sum(ExcessMortalitySummary.nonfire_excess).label("nonfire_excess"),
+                func.sum(ExcessMortalitySummary.population).label("population")
+            ).filter(ExcessMortalitySummary.fips == fips)
+            if year:
+                query = query.filter(ExcessMortalitySummary.year == year)
+            if age_group_list:
+                query = query.filter(ExcessMortalitySummary.age_group.in_(age_group_list))
+            query = query.group_by(ExcessMortalitySummary.year)
+            results = []
+            for row in query.all():
+                if sub_metric == "total":
+                    value = row.total_excess
+                elif sub_metric == "fire":
+                    value = row.fire_excess
+                elif sub_metric == "nonfire":
+                    value = row.nonfire_excess
+                else:
+                    value = row.total_excess
+                results.append({
+                    "year": row.year,
+                    "population": int(row.population) if row.population is not None else 0,
+                    "excess_mortality": float(value) if value is not None else 0.0,
+                    "total_excess": float(row.total_excess) if row.total_excess is not None else 0.0,
+                    "fire_excess": float(row.fire_excess) if row.fire_excess is not None else 0.0,
+                    "nonfire_excess": float(row.nonfire_excess) if row.nonfire_excess is not None else 0.0
+                })
+            return results
+        # Otherwise, return all age groups for the county-year (default behavior)
         query = db.query(ExcessMortalitySummary, County.name).join(County, County.fips == ExcessMortalitySummary.fips)
         if year:
             query = query.filter(ExcessMortalitySummary.year == year)
         if fips:
             query = query.filter(ExcessMortalitySummary.fips == fips)
+        if age_group_list:
+            query = query.filter(ExcessMortalitySummary.age_group == age_group_list)
         results = []
         for row, county_name in query.all():
             if sub_metric == "total":
@@ -1021,6 +1107,7 @@ def get_excess_mortality_summary(
                 "fips": row.fips,
                 "county_name": county_name,
                 "year": row.year,
+                "age_group": row.age_group,
                 "population": int(row.population) if row.population is not None else 0,
                 "excess_mortality": float(value) if value is not None else 0.0,
                 "total_excess": float(row.total_excess) if row.total_excess is not None else 0.0,

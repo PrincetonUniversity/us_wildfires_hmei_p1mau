@@ -141,7 +141,7 @@ const calculateDynamicColorScale = (data, metric) => {
 const PM25_LAYERS = ['average', 'max', 'pop_weighted'];
 const HEALTH_LAYERS = ['mortality', 'population'];
 
-const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelect, onCountyHover, mapRefreshKey, onMapLoaded, selectedCounty }) => {
+const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelect, onCountyHover, mapRefreshKey, onMapLoaded, selectedCounty, selectedAgeGroups }) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const popup = useRef(null); // Persistent popup
@@ -196,7 +196,10 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
             endpoint = '/api/counties/choropleth/mortality';
             params.append('year', year.toString());
             params.append('sub_metric', subMetric);
-            console.log('Fetching mortality data for year:', year, 'sub_metric:', subMetric);
+            if (selectedAgeGroups && selectedAgeGroups.length > 0) {
+              params.append('age_group', selectedAgeGroups.join(','));
+            }
+            console.log('Fetching mortality data for year:', year, 'sub_metric:', subMetric, 'age_groups:', selectedAgeGroups);
           } else if (activeLayer === 'population') {
             endpoint = '/api/counties/choropleth/population';
             params.append('year', year.toString());
@@ -229,7 +232,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     };
     fetchChoroplethData();
     return () => { isMounted = false; };
-  }, [mapRefreshKey, activeLayer, timeScale, year, month, season, pm25SubLayer, subMetric]);
+  }, [mapRefreshKey, activeLayer, timeScale, year, month, season, pm25SubLayer, subMetric, selectedAgeGroups]);
 
   // Proper cleanup when switching to health layers or timeScale changes
   useEffect(() => {
@@ -255,8 +258,36 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     }
     // Otherwise, show and update legend
     legend.style.display = 'block';
-    const colorScale = getColorScale(choroplethData) || [];
-    const metricLabel = getMetricLabel(activeLayer);
+    let colorScale = getColorScale(choroplethData) || [];
+    let metricLabel = getMetricLabel(activeLayer);
+    // Custom label for mortality
+    if (activeLayer === 'mortality') {
+      metricLabel = 'Excess Mortality \n (% of Selected Age Group Population)';
+      // Dynamic scale for mortality: use min/max from data
+      if (choroplethData && choroplethData.features && choroplethData.features.length > 0) {
+        const values = choroplethData.features.map(f => f.properties.value).filter(v => typeof v === 'number' && isFinite(v));
+        if (values.length > 0) {
+          const min = Math.min(...values);
+          const max = Math.max(...values);
+          // Create 6 evenly spaced breakpoints
+          const range = max - min;
+          const step = range / 5;
+          colorScale = [];
+          const colors = ['#fee5d9', '#fcae91', '#fb6a4a', '#de2d26', '#a50f15', '#67000d'];
+          for (let i = 0; i < colors.length; i++) {
+            let value;
+            if (i === 0) value = min;
+            else if (i === colors.length - 1) value = max;
+            else value = min + step * i;
+            // Ensure strictly increasing
+            if (colorScale.length > 0 && value <= colorScale[colorScale.length - 1][0]) {
+              value = colorScale[colorScale.length - 1][0] + 0.0001;
+            }
+            colorScale.push([value, colors[i]]);
+          }
+        }
+      }
+    }
     legend.innerHTML = '';
     const title = document.createElement('div');
     title.textContent = metricLabel;
@@ -542,6 +573,29 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
 
     // Handle health layers
     if (activeLayer === 'mortality') {
+      // Dynamic color scale for mortality
+      if (data && data.features && data.features.length > 0) {
+        const values = data.features.map(f => f.properties.value).filter(v => typeof v === 'number' && isFinite(v));
+        if (values.length > 0) {
+          const min = Math.min(...values);
+          const max = Math.max(...values);
+          const range = max - min;
+          const step = range / 5;
+          const colors = ['#fee5d9', '#fcae91', '#fb6a4a', '#de2d26', '#a50f15', '#67000d'];
+          const colorScale = [];
+          for (let i = 0; i < colors.length; i++) {
+            let value;
+            if (i === 0) value = min;
+            else if (i === colors.length - 1) value = max;
+            else value = min + step * i;
+            if (colorScale.length > 0 && value <= colorScale[colorScale.length - 1][0]) {
+              value = colorScale[colorScale.length - 1][0] + 0.0001;
+            }
+            colorScale.push([value, colors[i]]);
+          }
+          return colorScale;
+        }
+      }
       return MORTALITY_COLORS;
     }
     if (activeLayer === 'population') {

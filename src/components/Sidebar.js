@@ -4,6 +4,33 @@ import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
 import LayerTimeControls from './LayerTimeControls';
 import CountyInfoPanel from './CountyInfoPanel';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
+import Select from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
+import Checkbox from '@mui/material/Checkbox';
+import ListItemText from '@mui/material/ListItemText';
+
+const AGE_GROUPS = [
+    { value: 1, label: '0-4' },
+    { value: 2, label: '5-9' },
+    { value: 3, label: '10-14' },
+    { value: 4, label: '15-19' },
+    { value: 5, label: '20-24' },
+    { value: 6, label: '25-29' },
+    { value: 7, label: '30-34' },
+    { value: 8, label: '35-39' },
+    { value: 9, label: '40-44' },
+    { value: 10, label: '45-49' },
+    { value: 11, label: '50-54' },
+    { value: 12, label: '55-59' },
+    { value: 13, label: '60-64' },
+    { value: 14, label: '65-69' },
+    { value: 15, label: '70-74' },
+    { value: 16, label: '75-79' },
+    { value: 17, label: '80-84' },
+    { value: 18, label: '85+' },
+];
 
 const Sidebar = ({
     activeLayer,
@@ -14,8 +41,29 @@ const Sidebar = ({
     setTimeControls,
     selectedCounty,
     loading,
-    onClearSelectedCounty
+    onClearSelectedCounty,
+    selectedAgeGroups,
+    setSelectedAgeGroups
 }) => {
+    const handleChange = (event) => {
+        let value = event.target.value;
+        if (value.includes('all')) {
+            if (selectedAgeGroups.length === AGE_GROUPS.length) {
+                // If all are selected, clicking 'All' unselects all
+                setSelectedAgeGroups([]);
+            } else {
+                // Otherwise, select all
+                setSelectedAgeGroups(AGE_GROUPS.map(g => g.value));
+            }
+        } else {
+            // Convert all values to numbers
+            const selected = value.map(v => Number(v));
+            setSelectedAgeGroups(selected);
+        }
+    };
+    const isAllSelected = selectedAgeGroups.length === AGE_GROUPS.length;
+    const isNoneSelected = selectedAgeGroups.length === 0;
+    const allValues = AGE_GROUPS.map(g => String(g.value));
     return (
         <Box
             sx={{
@@ -48,6 +96,7 @@ const Sidebar = ({
                 '& .MuiButton-root': { minHeight: 22, fontSize: '0.82rem', py: 0.1, px: 0.8 },
                 mb: 0.2
             }}>
+                {/* Layer and sub-metric controls only */}
                 <LayerTimeControls
                     activeLayer={activeLayer}
                     setActiveLayer={setActiveLayer}
@@ -55,6 +104,48 @@ const Sidebar = ({
                     setPm25SubLayer={setPm25SubLayer}
                     timeControls={timeControls}
                     setTimeControls={setTimeControls}
+                    showTimeControls={false}
+                />
+                {/* Age group dropdown for mortality layer, below sub-metric pill, above time controls */}
+                {activeLayer === 'mortality' && (
+                    <Box sx={{ mt: 1, mb: 1 }}>
+                        <FormControl fullWidth size="small" variant="outlined">
+                            <InputLabel id="age-group-label" shrink>Age Group</InputLabel>
+                            <Select
+                                labelId="age-group-label"
+                                label="Age Group"
+                                multiple
+                                value={isNoneSelected ? [] : selectedAgeGroups.map(String)}
+                                onChange={handleChange}
+                                renderValue={(selected) => {
+                                    if (selected.length === 0) return 'None';
+                                    if (selected.length === AGE_GROUPS.length) return 'All Age Groups';
+                                    return AGE_GROUPS.filter(g => selected.includes(String(g.value))).map(g => g.label).join(', ');
+                                }}
+                            >
+                                <MenuItem value="all">
+                                    <Checkbox checked={isAllSelected} indeterminate={false} />
+                                    <ListItemText primary="All Age Groups" />
+                                </MenuItem>
+                                {AGE_GROUPS.map(group => (
+                                    <MenuItem key={group.value} value={String(group.value)}>
+                                        <Checkbox checked={selectedAgeGroups.includes(group.value)} />
+                                        <ListItemText primary={group.label} />
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+                    </Box>
+                )}
+                {/* Always show time controls below */}
+                <LayerTimeControls
+                    activeLayer={activeLayer}
+                    setActiveLayer={setActiveLayer}
+                    pm25SubLayer={pm25SubLayer}
+                    setPm25SubLayer={setPm25SubLayer}
+                    timeControls={timeControls}
+                    setTimeControls={setTimeControls}
+                    showTimeControls={true}
                 />
             </Paper>
             {/* Bottom: County Info */}

@@ -8,6 +8,27 @@ import './styles/style.css';
 const PM25_LAYERS = ['average', 'max', 'pop_weighted'];
 const HEALTH_LAYERS = ['mortality', 'population'];
 
+const AGE_GROUPS = [
+  { value: 1, label: '0-4' },
+  { value: 2, label: '5-9' },
+  { value: 3, label: '10-14' },
+  { value: 4, label: '15-19' },
+  { value: 5, label: '20-24' },
+  { value: 6, label: '25-29' },
+  { value: 7, label: '30-34' },
+  { value: 8, label: '35-39' },
+  { value: 9, label: '40-44' },
+  { value: 10, label: '45-49' },
+  { value: 11, label: '50-54' },
+  { value: 12, label: '55-59' },
+  { value: 13, label: '60-64' },
+  { value: 14, label: '65-69' },
+  { value: 15, label: '70-74' },
+  { value: 16, label: '75-79' },
+  { value: 17, label: '80-84' },
+  { value: 18, label: '85+' },
+];
+
 function App() {
   const [error, setError] = useState(null);
   // Single active layer and sublayer
@@ -20,6 +41,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [mapRefreshKey, setMapRefreshKey] = useState(0); // triggers map data refresh
   const mapboxToken = process.env.REACT_APP_MAPBOX_TOKEN;
+  const [selectedAgeGroups, setSelectedAgeGroups] = useState(AGE_GROUPS.map(g => g.value)); // default to all
 
   useEffect(() => {
     if (!mapboxToken || mapboxToken === 'YOUR_MAPBOX_ACCESS_TOKEN') {
@@ -159,6 +181,7 @@ function App() {
             mapRefreshKey={mapRefreshKey}
             onMapLoaded={handleMapLoaded}
             selectedCounty={selectedCounty}
+            selectedAgeGroups={selectedAgeGroups}
           />
         </Box>
         {/* Sidebar */}
@@ -172,6 +195,8 @@ function App() {
           selectedCounty={selectedCounty ? selectedCounty : hoveredCounty}
           loading={loading}
           onClearSelectedCounty={handleClearSelectedCounty}
+          selectedAgeGroups={selectedAgeGroups}
+          setSelectedAgeGroups={setSelectedAgeGroups}
         />
       </Box>
     </>
