@@ -103,7 +103,7 @@ export default function CountyMortalityBarChart({ data, timeScale = 'yearly' }) 
                                     textAnchor="middle"
                                     fontSize={9}
                                 >
-                                    {total.toFixed(1)}
+                                    {total.toFixed(0)}
                                 </text>
                             );
                         }}
