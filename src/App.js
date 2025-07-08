@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Container, CssBaseline, Typography } from '@mui/material';
+import { Box, Container, CssBaseline, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
 import Map from './components/Map';
 import Sidebar from './components/Sidebar';
 import CountyBarChart from './components/CountyBarChart';
@@ -42,6 +42,7 @@ function App() {
   const [mapRefreshKey, setMapRefreshKey] = useState(0); // triggers map data refresh
   const mapboxToken = process.env.REACT_APP_MAPBOX_TOKEN;
   const [selectedAgeGroups, setSelectedAgeGroups] = useState(AGE_GROUPS.map(g => g.value)); // default to all
+  const [openLanding, setOpenLanding] = useState(true); // modal opens on first load
 
   useEffect(() => {
     if (!mapboxToken || mapboxToken === 'YOUR_MAPBOX_ACCESS_TOKEN') {
@@ -158,6 +159,40 @@ function App() {
   return (
     <>
       <CssBaseline />
+      {/* Landing Modal */}
+      <Dialog open={openLanding} onClose={() => setOpenLanding(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Typography
+            variant="h5"
+            align="center"
+            fontWeight="bold"
+            fontFamily="Inter, Roboto, Helvetica Neue, sans-serif"
+            letterSpacing={0.5}
+          >
+            PM2.5 Wildfire Impact Map
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Typography textAlign="center" variant="body1" sx={{ mb: 2 }}>
+            Welcome! This tool allows you to explore the impact of PM2.5 pollution from wildfires across the United States using interactive maps and charts.
+          </Typography>
+        </DialogContent>
+        <DialogContent>
+          <Typography textAlign="center" variant="body2" color="text.secondary" gutterBottom>
+            <b>Data Sources:</b> PM2.5 and health data are sourced from public datasets including EPA Air Quality System (AQS), CDC Wonder, and US Census. See documentation for details.
+          </Typography>
+        </DialogContent>
+        <DialogContent>
+          <Typography textAlign="center" variant="body2" color="text.secondary">
+            <b>How to use:</b> Use the controls on the right to select data layers, time periods, and age groups. Click on a county for detailed information and time series charts.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenLanding(false)} variant="contained" color="primary">
+            Get Started
+          </Button>
+        </DialogActions>
+      </Dialog>
       {/* Header */}
       <Box component="header" sx={{ bgcolor: '#1976d2', color: 'white', py: 1, px: 1 }}>
         <Container maxWidth="xl">
