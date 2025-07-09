@@ -139,7 +139,7 @@ const calculateDynamicColorScale = (data, metric) => {
 };
 
 const PM25_LAYERS = ['average', 'max', 'pop_weighted'];
-const HEALTH_LAYERS = ['mortality', 'population'];
+const HEALTH_LAYERS = ['mortality', 'yll', 'population'];
 
 const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelect, onCountyHover, mapRefreshKey, onMapLoaded, selectedCounty, selectedAgeGroups }) => {
   const mapContainer = useRef(null);
@@ -162,6 +162,8 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
   } else if (HEALTH_LAYERS.includes(activeLayer)) {
     metric = activeLayer;
     if (activeLayer === 'mortality') {
+      subMetric = timeControls.subMetric || 'total';
+    } else if (activeLayer === 'yll') {
       subMetric = timeControls.subMetric || 'total';
     } else {
       subMetric = 'total';
@@ -200,6 +202,14 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
               params.append('age_group', selectedAgeGroups.join(','));
             }
             console.log('Fetching mortality data for year:', year, 'sub_metric:', subMetric, 'age_groups:', selectedAgeGroups);
+          } else if (activeLayer === 'yll') {
+            endpoint = '/api/counties/choropleth/yll';
+            params.append('year', year.toString());
+            params.append('sub_metric', subMetric);
+            if (selectedAgeGroups && selectedAgeGroups.length > 0) {
+              params.append('age_group', selectedAgeGroups.join(','));
+            }
+            console.log('Fetching YLL data for year:', year, 'sub_metric:', subMetric, 'age_groups:', selectedAgeGroups);
           } else if (activeLayer === 'population') {
             endpoint = '/api/counties/choropleth/population';
             params.append('year', year.toString());
@@ -260,30 +270,59 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     legend.style.display = 'block';
     let colorScale = getColorScale(choroplethData) || [];
     let metricLabel = getMetricLabel(activeLayer);
-    // Custom label for mortality
-    if (activeLayer === 'mortality') {
-      metricLabel = 'Excess Mortality \n (% of Selected Age Group Population)';
-      // Dynamic scale for mortality: use min/max from data
-      if (choroplethData && choroplethData.features && choroplethData.features.length > 0) {
-        const values = choroplethData.features.map(f => f.properties.value).filter(v => typeof v === 'number' && isFinite(v));
-        if (values.length > 0) {
-          const min = Math.min(...values);
-          const max = Math.max(...values);
-          // Create 6 evenly spaced breakpoints
-          const range = max - min;
-          const step = range / 5;
-          colorScale = [];
-          const colors = ['#fee5d9', '#fcae91', '#fb6a4a', '#de2d26', '#a50f15', '#67000d'];
-          for (let i = 0; i < colors.length; i++) {
-            let value;
-            if (i === 0) value = min;
-            else if (i === colors.length - 1) value = max;
-            else value = min + step * i;
-            // Ensure strictly increasing
-            if (colorScale.length > 0 && value <= colorScale[colorScale.length - 1][0]) {
-              value = colorScale[colorScale.length - 1][0] + 0.0001;
+    // Custom label for mortality/YLL
+    if (activeLayer === 'mortality' || activeLayer === 'yll') {
+      if (activeLayer === 'yll') {
+        metricLabel = 'Years of Life Lost (YLL)';
+        // For YLL, use the selected subMetric property
+        if (choroplethData && choroplethData.features && choroplethData.features.length > 0) {
+          const metricProp = getMetricProperty();
+          const values = choroplethData.features.map(f => f.properties[metricProp]).filter(v => typeof v === 'number' && isFinite(v));
+          if (values.length > 0) {
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            // Create 6 evenly spaced breakpoints
+            const range = max - min;
+            const step = range / 5;
+            colorScale = [];
+            const colors = ['#fee5d9', '#fcae91', '#fb6a4a', '#de2d26', '#a50f15', '#67000d'];
+            for (let i = 0; i < colors.length; i++) {
+              let value;
+              if (i === 0) value = min;
+              else if (i === colors.length - 1) value = max;
+              else value = min + step * i;
+              // Ensure strictly increasing
+              if (colorScale.length > 0 && value <= colorScale[colorScale.length - 1][0]) {
+                value = colorScale[colorScale.length - 1][0] + 0.0001;
+              }
+              colorScale.push([value, colors[i]]);
             }
-            colorScale.push([value, colors[i]]);
+          }
+        }
+      } else {
+        metricLabel = 'Excess Mortality (% of Selected Age Group Population)';
+        // For mortality, always use the percent value property for the legend
+        if (choroplethData && choroplethData.features && choroplethData.features.length > 0) {
+          const values = choroplethData.features.map(f => f.properties.value).filter(v => typeof v === 'number' && isFinite(v));
+          if (values.length > 0) {
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            // Create 6 evenly spaced breakpoints
+            const range = max - min;
+            const step = range / 5;
+            colorScale = [];
+            const colors = ['#fee5d9', '#fcae91', '#fb6a4a', '#de2d26', '#a50f15', '#67000d'];
+            for (let i = 0; i < colors.length; i++) {
+              let value;
+              if (i === 0) value = min;
+              else if (i === colors.length - 1) value = max;
+              else value = min + step * i;
+              // Ensure strictly increasing
+              if (colorScale.length > 0 && value <= colorScale[colorScale.length - 1][0]) {
+                value = colorScale[colorScale.length - 1][0] + 0.0001;
+              }
+              colorScale.push([value, colors[i]]);
+            }
           }
         }
       }
@@ -306,9 +345,21 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     labels.style.justifyContent = 'space-between';
     labels.style.fontSize = '0.8em';
     const minLabel = document.createElement('span');
-    minLabel.textContent = (activeLayer === 'mortality') ? colorScale[0][0].toFixed(3) + '%' : colorScale[0][0].toFixed(1);
+    if (activeLayer === 'yll') {
+      minLabel.textContent = colorScale[0][0].toFixed(0);
+    } else if (activeLayer === 'mortality') {
+      minLabel.textContent = colorScale[0][0].toFixed(3) + '%';
+    } else {
+      minLabel.textContent = colorScale[0][0].toFixed(1);
+    }
     const maxLabel = document.createElement('span');
-    maxLabel.textContent = (activeLayer === 'mortality') ? `${colorScale[colorScale.length - 1][0].toFixed(3)}%+` : `${colorScale[colorScale.length - 1][0].toFixed(1)}+`;
+    if (activeLayer === 'yll') {
+      maxLabel.textContent = colorScale[colorScale.length - 1][0].toFixed(0);
+    } else if (activeLayer === 'mortality') {
+      maxLabel.textContent = `${colorScale[colorScale.length - 1][0].toFixed(3)}%+`;
+    } else {
+      maxLabel.textContent = `${colorScale[colorScale.length - 1][0].toFixed(1)}+`;
+    }
     labels.appendChild(minLabel);
     labels.appendChild(maxLabel);
     legend.appendChild(labels);
@@ -317,7 +368,16 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
   // Helper to get the property name for the current metric and sub-metric
   const getMetricProperty = () => {
     if (activeLayer === 'mortality') {
-      return 'value';
+      if (subMetric === 'total') return 'total_excess';
+      if (subMetric === 'fire') return 'fire_excess';
+      if (subMetric === 'nonfire') return 'nonfire_excess';
+      return 'total_excess';
+    }
+    if (activeLayer === 'yll') {
+      if (subMetric === 'total') return 'yll_total';
+      if (subMetric === 'fire') return 'yll_fire';
+      if (subMetric === 'nonfire') return 'yll_nonfire';
+      return 'yll_total';
     }
     if (activeLayer === 'population') {
       return 'population';
@@ -598,6 +658,32 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
       }
       return MORTALITY_COLORS;
     }
+    if (activeLayer === 'yll') {
+      // Dynamic color scale for YLL
+      if (data && data.features && data.features.length > 0) {
+        const values = data.features.map(f => f.properties.value).filter(v => typeof v === 'number' && isFinite(v));
+        if (values.length > 0) {
+          const min = Math.min(...values);
+          const max = Math.max(...values);
+          const range = max - min;
+          const step = range / 5;
+          const colors = ['#fee5d9', '#fcae91', '#fb6a4a', '#de2d26', '#a50f15', '#67000d'];
+          const colorScale = [];
+          for (let i = 0; i < colors.length; i++) {
+            let value;
+            if (i === 0) value = min;
+            else if (i === colors.length - 1) value = max;
+            else value = min + step * i;
+            if (colorScale.length > 0 && value <= colorScale[colorScale.length - 1][0]) {
+              value = colorScale[colorScale.length - 1][0] + 0.0001;
+            }
+            colorScale.push([value, colors[i]]);
+          }
+          return colorScale;
+        }
+      }
+      return MORTALITY_COLORS; // Fallback to mortality colors for YLL
+    }
     if (activeLayer === 'population') {
       return POPULATION_COLORS;
     }
@@ -620,6 +706,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
   const getMetricLabel = (metric = getMetricProperty()) => {
     if (activeLayer === 'mortality') {
       return 'Excess Mortality (% of Population)';
+    }
+    if (activeLayer === 'yll') {
+      return 'Years of Life Lost (YLL)';
     }
     if (activeLayer === 'population') {
       return 'Population';
@@ -648,7 +737,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
 
     console.log('Rendering map layer for:', activeLayer);
     const mapInstance = map.current;
-    const metricForColor = getMetricProperty();
+    const metricForColor = (activeLayer === 'mortality') ? 'value' : getMetricProperty();
     console.log('Using metric for color:', metricForColor);
 
     // Remove the layer if it exists
@@ -719,8 +808,13 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
             }
           } catch (err) { }
           const countyName = props.county_name || props.NAME || 'Unknown County';
-          const metricProperty = getMetricProperty();
-          const value = props[metricProperty] || 0;
+          let value;
+          if (activeLayer === 'mortality') {
+            value = props.value || 0;
+          } else {
+            const metricProperty = getMetricProperty();
+            value = props[metricProperty] || 0;
+          }
           const countyData = {
             name: countyName,
             value,
@@ -741,6 +835,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
             total_excess: props.total_excess,
             fire_excess: props.fire_excess,
             nonfire_excess: props.nonfire_excess,
+            yll_total: props.yll_total,
+            yll_fire: props.yll_fire,
+            yll_nonfire: props.yll_nonfire,
             barChartData,
             timeScale,
             year,
@@ -790,8 +887,13 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
         const props = feature.properties;
         const countyId = props.GEOID || props.FIPS || props.fips;
         const countyName = props.county_name || props.NAME || 'Unknown County';
-        const metricProperty = getMetricProperty();
-        const value = props[metricProperty] || 0;
+        let value;
+        if (activeLayer === 'mortality') {
+          value = props.value || 0;
+        } else {
+          const metricProperty = getMetricProperty();
+          value = props[metricProperty] || 0;
+        }
 
         // Fetch bar chart data for selected county
         let barChartData = [];
@@ -831,6 +933,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
           total_excess: props.total_excess,
           fire_excess: props.fire_excess,
           nonfire_excess: props.nonfire_excess,
+          yll_total: props.yll_total,
+          yll_fire: props.yll_fire,
+          yll_nonfire: props.yll_nonfire,
           barChartData,
           timeScale,
           year,

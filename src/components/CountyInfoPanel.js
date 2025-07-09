@@ -38,7 +38,10 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
         activeLayer,
         total_excess,
         fire_excess,
-        nonfire_excess
+        nonfire_excess,
+        yll_total,
+        yll_fire,
+        yll_nonfire
     } = selectedCounty;
 
     const isBarChartDataForCurrentTimeScale = () => {
@@ -87,6 +90,18 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
                     Excess from Non-fire PM2.5: {nonfire_excess !== undefined ? nonfire_excess.toFixed(1) : 'N/A'} deaths/year
                 </Typography>
             </>;
+        } else if (activeLayer === 'yll') {
+            return <>
+                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
+                    YLL (Years of Life Lost): {yll_total !== undefined ? yll_total.toFixed(1) : 'N/A'}
+                </Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
+                    YLL from Fire-attributed PM2.5: {yll_fire !== undefined ? yll_fire.toFixed(1) : 'N/A'}
+                </Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
+                    YLL from Non-fire PM2.5: {yll_nonfire !== undefined ? yll_nonfire.toFixed(1) : 'N/A'}
+                </Typography>
+            </>;
         } else if (activeLayer === 'population') {
             return <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Population: {population !== undefined ? population.toLocaleString() : 'N/A'}</Typography>;
         }
@@ -125,13 +140,15 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
             {isBarChartDataForCurrentTimeScale() && (
                 <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
                     <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: '1em', mb: 0.5 }}>
-                        {activeLayer === 'mortality' ? 'Excess Mortality Bar Chart' : 'PM2.5 Bar Chart'}
+                        {activeLayer === 'mortality' ? 'Excess Mortality Bar Chart' : activeLayer === 'yll' ? 'YLL Bar Chart' : 'PM2.5 Bar Chart'}
                         <span style={{ fontWeight: 'normal', fontSize: '0.8em', color: '#888', marginLeft: 8 }}>
                             [{barChartData[0]?.displayType}] {barChartData.length} pts
                         </span>
                     </Typography>
                     {activeLayer === 'mortality' ? (
                         <CountyMortalityBarChart data={barChartData} timeScale="yearly" />
+                    ) : activeLayer === 'yll' ? (
+                        <CountyMortalityBarChart data={barChartData} timeScale="yearly" yllMode />
                     ) : (
                         <CountyBarChart key={timeScale} data={barChartData} timeScale={timeScale} />
                     )}

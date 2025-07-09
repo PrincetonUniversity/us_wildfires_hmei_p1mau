@@ -756,6 +756,117 @@ async def get_choropleth_population(
         logger.error(f"Error in population choropleth: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@choropleth_router.get("/yll")
+async def get_choropleth_yll(
+    year: int = Query(..., description="Year required for YLL data"),
+    sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$", description="Which YLL to return: total, fire, or nonfire"),
+    age_group: Optional[str] = Query(None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
+    db: Session = Depends(get_db)
+):
+    """Get YLL impact choropleth data (precomputed summary, total/fire/nonfire), optionally by age group(s)."""
+    try:
+        base_query = db.query(
+            County.fips,
+            County.name.label("county_name"),
+            County.geometry,
+            ExcessMortalitySummary.yll_total,
+            ExcessMortalitySummary.yll_fire,
+            ExcessMortalitySummary.yll_nonfire,
+            ExcessMortalitySummary.population,
+            ExcessMortalitySummary.age_group
+        ).join(
+            ExcessMortalitySummary, and_(
+                ExcessMortalitySummary.fips == County.fips,
+                ExcessMortalitySummary.year == year
+            )
+        ).filter(
+            ~County.fips.startswith('72')
+        )
+        age_group_list = None
+        if age_group is not None and age_group.strip() != '':
+            age_group_list = [int(x) for x in age_group.split(',') if x.strip().isdigit()]
+        if age_group_list:
+            # Sum over selected age groups for each county
+            subq = db.query(
+                ExcessMortalitySummary.fips,
+                func.sum(ExcessMortalitySummary.yll_total).label("yll_total"),
+                func.sum(ExcessMortalitySummary.yll_fire).label("yll_fire"),
+                func.sum(ExcessMortalitySummary.yll_nonfire).label("yll_nonfire"),
+                func.sum(ExcessMortalitySummary.population).label("population")
+            ).filter(
+                ExcessMortalitySummary.year == year,
+                ExcessMortalitySummary.age_group.in_(age_group_list)
+            ).group_by(ExcessMortalitySummary.fips).subquery()
+            results = db.query(
+                County.fips,
+                County.name.label("county_name"),
+                County.geometry,
+                subq.c.yll_total,
+                subq.c.yll_fire,
+                subq.c.yll_nonfire,
+                subq.c.population
+            ).join(subq, subq.c.fips == County.fips).filter(~County.fips.startswith('72')).all()
+        else:
+            # Sum over all age groups for each county-year
+            subq = db.query(
+                ExcessMortalitySummary.fips,
+                func.sum(ExcessMortalitySummary.yll_total).label("yll_total"),
+                func.sum(ExcessMortalitySummary.yll_fire).label("yll_fire"),
+                func.sum(ExcessMortalitySummary.yll_nonfire).label("yll_nonfire"),
+                func.sum(ExcessMortalitySummary.population).label("population")
+            ).filter(
+                ExcessMortalitySummary.year == year
+            ).group_by(ExcessMortalitySummary.fips).subquery()
+            results = db.query(
+                County.fips,
+                County.name.label("county_name"),
+                County.geometry,
+                subq.c.yll_total,
+                subq.c.yll_fire,
+                subq.c.yll_nonfire,
+                subq.c.population
+            ).join(subq, subq.c.fips == County.fips).filter(~County.fips.startswith('72')).all()
+        features = []
+        for row in results:
+            if not row.geometry:
+                continue
+            if sub_metric == "total":
+                yll = row.yll_total
+            elif sub_metric == "fire":
+                yll = row.yll_fire
+            elif sub_metric == "nonfire":
+                yll = row.yll_nonfire
+            else:
+                yll = row.yll_total
+            feature = {
+                "type": "Feature",
+                "geometry": row.geometry,
+                "properties": {
+                    "fips": row.fips,
+                    "county_name": row.county_name,
+                    "yll_total": float(row.yll_total) if row.yll_total is not None else 0.0,
+                    "yll_fire": float(row.yll_fire) if row.yll_fire is not None else 0.0,
+                    "yll_nonfire": float(row.yll_nonfire) if row.yll_nonfire is not None else 0.0,
+                    "population": int(row.population) if row.population is not None else 0,
+                    "value": float(yll) if yll is not None else 0.0
+                }
+            }
+            features.append(feature)
+        return {
+            "type": "FeatureCollection",
+            "features": features,
+            "metadata": {
+                "time_scale": "yearly",
+                "year": year,
+                "metric": f"yll_{sub_metric}",
+                "feature_count": len(features),
+                "age_group": age_group
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error in YLL choropleth: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Register the router
 app.include_router(choropleth_router)
 

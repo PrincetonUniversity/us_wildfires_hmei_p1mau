@@ -40,6 +40,7 @@ const Sidebar = ({
     timeControls,
     setTimeControls,
     selectedCounty,
+    hoveredCounty,
     loading,
     onClearSelectedCounty,
     selectedAgeGroups,
@@ -106,8 +107,8 @@ const Sidebar = ({
                     setTimeControls={setTimeControls}
                     showTimeControls={false}
                 />
-                {/* Age group dropdown for mortality layer, below sub-metric pill, above time controls */}
-                {activeLayer === 'mortality' && (
+                {/* Age group dropdown for mortality and YLL layers, below sub-metric pill, above time controls */}
+                {(activeLayer === 'mortality' || activeLayer === 'yll') && (
                     <Box sx={{ mt: 1, mb: 1 }}>
                         <FormControl fullWidth size="small" variant="outlined">
                             <InputLabel id="age-group-label" shrink>Age Group</InputLabel>
@@ -168,7 +169,7 @@ const Sidebar = ({
                     borderRadius: 8
                 }
             }}>
-                <CountyInfoPanel selectedCounty={selectedCounty} onClearSelectedCounty={onClearSelectedCounty} />
+                <CountyInfoPanel selectedCounty={hoveredCounty || selectedCounty} onClearSelectedCounty={onClearSelectedCounty} />
             </Box>
         </Box>
     );

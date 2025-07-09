@@ -6,11 +6,12 @@ const COLORS = {
     fire: "#ffb74d",    // orange
 };
 
-export default function CountyMortalityBarChart({ data, timeScale = 'yearly' }) {
+export default function CountyMortalityBarChart({ data, timeScale = 'yearly', yllMode = false }) {
     // Format data
     const formattedData = data.map(item => {
-        const fire = Math.max(0, Number(item.fire) || 0);
-        const nonFire = Math.max(0, Number(item.nonFire) || 0);
+        // Use YLL values if yllMode, otherwise deaths
+        const fire = Math.max(0, Number(yllMode ? item.yll_fire : item.fire) || 0);
+        const nonFire = Math.max(0, Number(yllMode ? item.yll_nonfire : item.nonFire) || 0);
         return {
             ...item,
             fire,
@@ -34,9 +35,9 @@ export default function CountyMortalityBarChart({ data, timeScale = 'yearly' }) 
             return (
                 <div style={{ backgroundColor: 'white', padding: 8, border: '1px solid #ccc', borderRadius: 4, fontSize: 12 }}>
                     <p style={{ margin: 0, fontWeight: 'bold' }}>Year {label}</p>
-                    <p style={{ margin: 0, color: COLORS.fire }}>Fire-attributed: {payload[1].value.toFixed(1)} deaths/year</p>
-                    <p style={{ margin: 0, color: COLORS.nonFire }}>Non-fire: {payload[0].value.toFixed(1)} deaths/year</p>
-                    <p style={{ margin: 0, fontWeight: 'bold' }}>Total: {total} deaths/year</p>
+                    <p style={{ margin: 0, color: COLORS.fire }}>{yllMode ? 'Fire-attributed YLL:' : 'Fire-attributed:'} {payload[1].value.toFixed(1)} {yllMode ? 'YLL' : 'deaths/year'}</p>
+                    <p style={{ margin: 0, color: COLORS.nonFire }}>{yllMode ? 'Non-fire YLL:' : 'Non-fire:'} {payload[0].value.toFixed(1)} {yllMode ? 'YLL' : 'deaths/year'}</p>
+                    <p style={{ margin: 0, fontWeight: 'bold' }}>Total: {total} {yllMode ? 'YLL' : 'deaths/year'}</p>
                 </div>
             );
         }
@@ -70,7 +71,7 @@ export default function CountyMortalityBarChart({ data, timeScale = 'yearly' }) 
                     tick={{ fontSize: 9 }}
                     width={35}
                     label={{
-                        value: 'Excess Mortality (deaths/year)',
+                        value: yllMode ? 'Years of Life Lost (YLL)' : 'Excess Mortality (deaths/year)',
                         angle: -90,
                         position: 'insideLeft',
                         style: { textAnchor: 'middle', fontSize: 9 },
@@ -82,13 +83,13 @@ export default function CountyMortalityBarChart({ data, timeScale = 'yearly' }) 
                 <Bar
                     dataKey="nonFire"
                     stackId="a"
-                    name="Non-fire"
+                    name={yllMode ? 'Non-fire YLL' : 'Non-fire'}
                     fill={COLORS.nonFire}
                 />
                 <Bar
                     dataKey="fire"
                     stackId="a"
-                    name="Fire-attributed"
+                    name={yllMode ? 'Fire-attributed YLL' : 'Fire-attributed'}
                     fill={COLORS.fire}
                 >
                     <LabelList

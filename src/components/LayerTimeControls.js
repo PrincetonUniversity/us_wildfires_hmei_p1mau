@@ -46,6 +46,7 @@ const LayerTimeControls = ({
     // Health options
     const healthOptions = [
         { value: 'mortality', label: 'Mortality' },
+        { value: 'yll', label: 'YLL' },
         { value: 'population', label: 'Population' },
     ];
 
@@ -71,8 +72,8 @@ const LayerTimeControls = ({
                 <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.2, fontSize: '0.98em' }}>
                     Time Controls
                 </Typography>
-                {['mortality', 'population'].includes(activeLayer) ? (
-                    // Only show year dropdown for mortality/population
+                {['mortality', 'yll', 'population'].includes(activeLayer) ? (
+                    // Only show year dropdown for mortality/YLL/population
                     <FormControl size="small" sx={{ mb: 0.5 }}>
                         <InputLabel id="year-label">Year</InputLabel>
                         <Select
@@ -240,7 +241,13 @@ const LayerTimeControls = ({
                                         color: 'white'
                                     }
                                 }}
-                                onClick={() => setActiveLayer(opt.value)}
+                                onClick={() => {
+                                    setActiveLayer(opt.value);
+                                    // If switching to YLL, set subMetric to 'total' by default
+                                    if (opt.value === 'yll') {
+                                        setTimeControls({ ...timeControls, subMetric: 'total' });
+                                    }
+                                }}
                             >
                                 {opt.label}
                             </Button>
@@ -248,6 +255,32 @@ const LayerTimeControls = ({
                     </ButtonGroup>
                     {/* Mortality sub-metric selector */}
                     {activeLayer === 'mortality' && (
+                        <Box sx={{ ml: 0, mt: 0.7 }}>
+                            <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
+                                {mortalitySubOptions.map(subOpt => (
+                                    <Button
+                                        key={subOpt.value}
+                                        size="small"
+                                        sx={{
+                                            ...pillStyle,
+                                            bgcolor: (timeControls.subMetric || 'total') === subOpt.value ? 'secondary.main' : 'white',
+                                            color: (timeControls.subMetric || 'total') === subOpt.value ? 'white' : 'secondary.main',
+                                            borderColor: 'secondary.main',
+                                            '&:hover': {
+                                                bgcolor: (timeControls.subMetric || 'total') === subOpt.value ? 'secondary.dark' : 'secondary.light',
+                                                color: 'white'
+                                            }
+                                        }}
+                                        onClick={() => setTimeControls({ ...timeControls, subMetric: subOpt.value })}
+                                    >
+                                        {subOpt.label}
+                                    </Button>
+                                ))}
+                            </ButtonGroup>
+                        </Box>
+                    )}
+                    {/* YLL sub-metric selector (same as mortality) */}
+                    {activeLayer === 'yll' && (
                         <Box sx={{ ml: 0, mt: 0.7 }}>
                             <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
                                 {mortalitySubOptions.map(subOpt => (
