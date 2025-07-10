@@ -22,7 +22,7 @@ from db.database import SessionLocal, engine, Base
 from db.models import (
     DailyPM25, County, Population,
     YearlyPM25Summary, MonthlyPM25Summary, SeasonalPM25Summary,
-    BaselineMortalityRate, ExcessMortalitySummary
+    BaselineMortalityRate, ExcessMortalitySummary, ExceedanceSummary
 )
 
 import geopandas as gpd
@@ -37,8 +37,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('app.log')
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
@@ -1228,6 +1227,53 @@ def get_excess_mortality_summary(
         return results
     except Exception as e:
         logger.error(f"Error in excess mortality summary endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/counties/exceedance")
+def get_exceedance_summary(db: Session = Depends(get_db)):
+    """
+    Return exceedance summary for all counties as GeoJSON.
+    """
+    try:
+        results = db.query(
+            County.fips,
+            County.name,
+            County.geometry,
+            ExceedanceSummary.threshold_8,
+            ExceedanceSummary.threshold_9
+        ).join(
+            ExceedanceSummary, County.fips == ExceedanceSummary.fips
+        ).all()
+
+        features = []
+        for row in results:
+            features.append({
+                "type": "Feature",
+                "geometry": row.geometry,
+                "properties": {
+                    "fips": row.fips,
+                    "county_name": row.name,
+                    "threshold_8": row.threshold_8,
+                    "threshold_9": row.threshold_9,
+                }
+            })
+        return {
+            "type": "FeatureCollection",
+            "features": features,
+            "metadata": {
+                "description": "Exceedance summary for regulatory support",
+                "thresholds": [8, 9],
+                "tier_meanings": {
+                    0: "Below the threshold",
+                    1: "Exceeding due to fire smoke on Tier 1 days",
+                    2: "Exceeding due to fire smoke on Tier 1&2 days",
+                    3: "Exceeding due to fire smoke on Tier 1,2,3 days",
+                    4: "Exceeding even after excluding fire smoke on all Tier 1,2,3 days"
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error in exceedance summary endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Health check endpoint

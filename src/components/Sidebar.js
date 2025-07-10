@@ -32,6 +32,8 @@ const AGE_GROUPS = [
     { value: 18, label: '85+' },
 ];
 
+const EXCEEDANCE_LAYERS = ['exceedance_8', 'exceedance_9'];
+
 const Sidebar = ({
     activeLayer,
     setActiveLayer,
@@ -108,7 +110,7 @@ const Sidebar = ({
                     showTimeControls={false}
                 />
                 {/* Age group dropdown for mortality and YLL layers, below sub-metric pill, above time controls */}
-                {(activeLayer === 'mortality' || activeLayer === 'yll') && (
+                {!(EXCEEDANCE_LAYERS.includes(activeLayer)) && (activeLayer === 'mortality' || activeLayer === 'yll') && (
                     <Box sx={{ mt: 1, mb: 1 }}>
                         <FormControl fullWidth size="small" variant="outlined">
                             <InputLabel id="age-group-label" shrink>Age Group</InputLabel>
@@ -138,16 +140,18 @@ const Sidebar = ({
                         </FormControl>
                     </Box>
                 )}
-                {/* Always show time controls below */}
-                <LayerTimeControls
-                    activeLayer={activeLayer}
-                    setActiveLayer={setActiveLayer}
-                    pm25SubLayer={pm25SubLayer}
-                    setPm25SubLayer={setPm25SubLayer}
-                    timeControls={timeControls}
-                    setTimeControls={setTimeControls}
-                    showTimeControls={true}
-                />
+                {/* Always show time controls below, except for exceedance layers */}
+                {!(EXCEEDANCE_LAYERS.includes(activeLayer)) && (
+                    <LayerTimeControls
+                        activeLayer={activeLayer}
+                        setActiveLayer={setActiveLayer}
+                        pm25SubLayer={pm25SubLayer}
+                        setPm25SubLayer={setPm25SubLayer}
+                        timeControls={timeControls}
+                        setTimeControls={setTimeControls}
+                        showTimeControls={true}
+                    />
+                )}
             </Paper>
             {/* Bottom: County Info */}
             <Box sx={{

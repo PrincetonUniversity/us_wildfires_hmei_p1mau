@@ -32,10 +32,11 @@ const LayerTimeControls = ({
     showTimeControls
 }) => {
     // PM2.5 main options
+    // { value: 'pop_weighted', label: 'Pop-weighted' },
     const pm25Options = [
         { value: 'average', label: 'Average' },
         { value: 'max', label: 'Max' },
-        { value: 'pop_weighted', label: 'Pop-weighted' },
+        
     ];
     // PM2.5 sub-options
     const pm25SubOptions = [
@@ -198,23 +199,23 @@ const LayerTimeControls = ({
                         {PM25_LAYERS.includes(activeLayer) && (
                             <Box sx={{ ml: 0, mt: 0.3 }}>
                                 <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
-                                    {pm25SubOptions.map(subOpt => (
+                                    {pm25SubOptions.map(opt => (
                                         <Button
-                                            key={subOpt.value}
+                                            key={opt.value}
                                             size="small"
                                             sx={{
                                                 ...pillStyle,
-                                                bgcolor: pm25SubLayer === subOpt.value ? 'primary.main' : 'white',
-                                                color: pm25SubLayer === subOpt.value ? 'white' : 'primary.main',
+                                                bgcolor: pm25SubLayer === opt.value ? 'primary.main' : 'white',
+                                                color: pm25SubLayer === opt.value ? 'white' : 'primary.main',
                                                 borderColor: 'primary.main',
                                                 '&:hover': {
-                                                    bgcolor: pm25SubLayer === subOpt.value ? 'primary.dark' : 'primary.light',
+                                                    bgcolor: pm25SubLayer === opt.value ? 'primary.dark' : 'primary.light',
                                                     color: 'white'
                                                 }
                                             }}
-                                            onClick={() => setPm25SubLayer(subOpt.value)}
+                                            onClick={() => setPm25SubLayer(opt.value)}
                                         >
-                                            {subOpt.label}
+                                            {opt.label}
                                         </Button>
                                     ))}
                                 </ButtonGroup>
@@ -222,15 +223,16 @@ const LayerTimeControls = ({
                         )}
                     </Box>
                 </Box>
-                {/* Health/Demographic Section */}
+                {/* Health Section */}
                 <Box sx={{ mb: 1.1 }}>
                     <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.4, fontSize: '0.98em' }}>
-                        Health / Demographic
+                        Health Metrics
                     </Typography>
-                    <ButtonGroup variant="outlined" sx={{ flexWrap: 'wrap' }}>
+                    <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
                         {healthOptions.map(opt => (
                             <Button
                                 key={opt.value}
+                                size="small"
                                 sx={{
                                     ...pillStyle,
                                     bgcolor: activeLayer === opt.value ? 'secondary.main' : 'white',
@@ -241,71 +243,51 @@ const LayerTimeControls = ({
                                         color: 'white'
                                     }
                                 }}
-                                onClick={() => {
-                                    setActiveLayer(opt.value);
-                                    // If switching to YLL, set subMetric to 'total' by default
-                                    if (opt.value === 'yll') {
-                                        setTimeControls({ ...timeControls, subMetric: 'total' });
-                                    }
-                                }}
+                                onClick={() => setActiveLayer(opt.value)}
                             >
                                 {opt.label}
                             </Button>
                         ))}
                     </ButtonGroup>
-                    {/* Mortality sub-metric selector */}
-                    {activeLayer === 'mortality' && (
-                        <Box sx={{ ml: 0, mt: 0.7 }}>
-                            <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
-                                {mortalitySubOptions.map(subOpt => (
-                                    <Button
-                                        key={subOpt.value}
-                                        size="small"
-                                        sx={{
-                                            ...pillStyle,
-                                            bgcolor: (timeControls.subMetric || 'total') === subOpt.value ? 'secondary.main' : 'white',
-                                            color: (timeControls.subMetric || 'total') === subOpt.value ? 'white' : 'secondary.main',
-                                            borderColor: 'secondary.main',
-                                            '&:hover': {
-                                                bgcolor: (timeControls.subMetric || 'total') === subOpt.value ? 'secondary.dark' : 'secondary.light',
-                                                color: 'white'
-                                            }
-                                        }}
-                                        onClick={() => setTimeControls({ ...timeControls, subMetric: subOpt.value })}
-                                    >
-                                        {subOpt.label}
-                                    </Button>
-                                ))}
-                            </ButtonGroup>
-                        </Box>
-                    )}
-                    {/* YLL sub-metric selector (same as mortality) */}
-                    {activeLayer === 'yll' && (
-                        <Box sx={{ ml: 0, mt: 0.7 }}>
-                            <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
-                                {mortalitySubOptions.map(subOpt => (
-                                    <Button
-                                        key={subOpt.value}
-                                        size="small"
-                                        sx={{
-                                            ...pillStyle,
-                                            bgcolor: (timeControls.subMetric || 'total') === subOpt.value ? 'secondary.main' : 'white',
-                                            color: (timeControls.subMetric || 'total') === subOpt.value ? 'white' : 'secondary.main',
-                                            borderColor: 'secondary.main',
-                                            '&:hover': {
-                                                bgcolor: (timeControls.subMetric || 'total') === subOpt.value ? 'secondary.dark' : 'secondary.light',
-                                                color: 'white'
-                                            }
-                                        }}
-                                        onClick={() => setTimeControls({ ...timeControls, subMetric: subOpt.value })}
-                                    >
-                                        {subOpt.label}
-                                    </Button>
-                                ))}
-                            </ButtonGroup>
-                        </Box>
-                    )}
                 </Box>
+                {/* Regulatory Support / Exceedance Category Section */}
+                <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.4, fontSize: '0.98em' }}>
+                    Exceedance Categories (2021-2023 Average)
+                </Typography>
+                <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
+                    <Button
+                        size="small"
+                        sx={{
+                            ...pillStyle,
+                            bgcolor: activeLayer === 'exceedance_8' ? '#4dd0e1' : 'white',
+                            color: activeLayer === 'exceedance_8' ? 'white' : '#00838f',
+                            borderColor: '#00838f',
+                            '&:hover': {
+                                bgcolor: activeLayer === 'exceedance_8' ? '#00838f' : '#b2ebf2',
+                                color: 'white'
+                            }
+                        }}
+                        onClick={() => setActiveLayer('exceedance_8')}
+                    >
+                        Exceedance (8 µg/m³)
+                    </Button>
+                    <Button
+                        size="small"
+                        sx={{
+                            ...pillStyle,
+                            bgcolor: activeLayer === 'exceedance_9' ? '#4dd0e1' : 'white',
+                            color: activeLayer === 'exceedance_9' ? 'white' : '#00838f',
+                            borderColor: '#00838f',
+                            '&:hover': {
+                                bgcolor: activeLayer === 'exceedance_9' ? '#00838f' : '#b2ebf2',
+                                color: 'white'
+                            }
+                        }}
+                        onClick={() => setActiveLayer('exceedance_9')}
+                    >
+                        Exceedance (9 µg/m³)
+                    </Button>
+                </ButtonGroup>
             </>
         );
     }

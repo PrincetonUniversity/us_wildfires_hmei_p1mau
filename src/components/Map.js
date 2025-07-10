@@ -52,6 +52,15 @@ const MORTALITY_COLORS = [
   [0.5, '#67000d']     // darkest red
 ];
 
+// Color scale for exceedance values (transparent to distinct colors)
+const EXCEEDANCE_COLORS = [
+  [0, 'rgba(0,0,0,0)'], // transparent for below threshold
+  [1, '#b2ebf2'],      // 
+  [2, '#4dd0e1'],      // 
+  [3, '#00838f'],      // 
+  [4, '#d32f2f']       // 
+];
+
 // State FIPS to abbreviation mapping
 const STATE_FIPS_TO_ABBR = {
   '01': 'AL', '02': 'AK', '04': 'AZ', '05': 'AR', '06': 'CA', '08': 'CO', '09': 'CT', '10': 'DE',
@@ -140,6 +149,15 @@ const calculateDynamicColorScale = (data, metric) => {
 
 const PM25_LAYERS = ['average', 'max', 'pop_weighted'];
 const HEALTH_LAYERS = ['mortality', 'yll', 'population'];
+const EXCEEDANCE_LAYERS = ['exceedance_8', 'exceedance_9'];
+
+const categoryMeanings = [
+  'Below threshold',
+  'Exceeding due to fire smoke on Tier 1 days',
+  'Exceeding due to fire smoke on Tier 1 & 2 days',
+  'Exceeding due to fire smoke on Tier 1,2,3 days',
+  'Exceeding after excluding fire smoke on Tier 1,2,3 days'
+];
 
 const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelect, onCountyHover, mapRefreshKey, onMapLoaded, selectedCounty, selectedAgeGroups }) => {
   const mapContainer = useRef(null);
@@ -172,28 +190,26 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
 
   // Fetch choropleth data when mapRefreshKey or any relevant prop changes
   useEffect(() => {
-    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer)) return;
+    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer) && !EXCEEDANCE_LAYERS.includes(activeLayer)) return;
     let isMounted = true;
     const fetchChoroplethData = async () => {
       try {
         setLoading(true);
-        let params = new URLSearchParams();
         let endpoint = '/api/counties/choropleth/average';
-
-        console.log('Fetching choropleth data for layer:', activeLayer);
-
+        let url = '';
         if (PM25_LAYERS.includes(activeLayer)) {
+          let params = new URLSearchParams();
           // PM2.5 layers
           params.append('time_scale', timeScale);
           if (year) params.append('year', year.toString());
           if (timeScale === 'monthly' && month) params.append('month', month.toString());
           if (timeScale === 'seasonal' && season) params.append('season', season);
           params.append('sub_metric', subMetric);
-
           if (metric === 'max') endpoint = '/api/counties/choropleth/max';
           if (metric === 'pop_weighted') endpoint = '/api/counties/choropleth/pop_weighted';
+          url = `http://localhost:8000${endpoint}?${params}`;
         } else if (HEALTH_LAYERS.includes(activeLayer)) {
-          // Health layers
+          let params = new URLSearchParams();
           if (activeLayer === 'mortality') {
             endpoint = '/api/counties/choropleth/mortality';
             params.append('year', year.toString());
@@ -201,7 +217,6 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
             if (selectedAgeGroups && selectedAgeGroups.length > 0) {
               params.append('age_group', selectedAgeGroups.join(','));
             }
-            console.log('Fetching mortality data for year:', year, 'sub_metric:', subMetric, 'age_groups:', selectedAgeGroups);
           } else if (activeLayer === 'yll') {
             endpoint = '/api/counties/choropleth/yll';
             params.append('year', year.toString());
@@ -209,30 +224,27 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
             if (selectedAgeGroups && selectedAgeGroups.length > 0) {
               params.append('age_group', selectedAgeGroups.join(','));
             }
-            console.log('Fetching YLL data for year:', year, 'sub_metric:', subMetric, 'age_groups:', selectedAgeGroups);
           } else if (activeLayer === 'population') {
             endpoint = '/api/counties/choropleth/population';
             params.append('year', year.toString());
-            console.log('Fetching population data for year:', year);
           }
-          // Add other health layers here as needed
+          url = `http://localhost:8000${endpoint}?${params}`;
+        } else if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
+          endpoint = '/api/counties/exceedance';
+          url = `http://localhost:8000${endpoint}`;
         }
-
-        console.log('Making request to:', `http://localhost:8000${endpoint}?${params}`);
-        const response = await fetch(`http://localhost:8000${endpoint}?${params}`);
+        const response = await fetch(url);
         if (!response.ok) {
           const errorText = await response.text();
           throw new Error(`Failed to fetch choropleth data: ${response.status} ${response.statusText}\n${errorText}`);
         }
         const data = await response.json();
-        console.log('Received choropleth data:', data.features ? `${data.features.length} features` : 'No features');
         if (isMounted) {
           setChoroplethData(data);
           setLoading(false);
           if (onMapLoaded) onMapLoaded();
         }
       } catch (err) {
-        console.error('Error fetching choropleth data:', err);
         if (isMounted) {
           setError(err.message);
           setLoading(false);
@@ -242,28 +254,58 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     };
     fetchChoroplethData();
     return () => { isMounted = false; };
-  }, [mapRefreshKey, activeLayer, timeScale, year, month, season, pm25SubLayer, subMetric, selectedAgeGroups]);
+  }, [mapRefreshKey, activeLayer, timeScale, year, month, season, pm25SubLayer, selectedAgeGroups]);
 
   // Proper cleanup when switching to health layers or timeScale changes
   useEffect(() => {
     if (!map.current) return;
     const legend = document.getElementById('legend');
-    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer)) {
+    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer) && !EXCEEDANCE_LAYERS.includes(activeLayer)) {
       if (legend) legend.style.display = 'none';
     } else {
       if (legend) legend.style.display = 'block';
     }
   }, [activeLayer, timeScale]);
 
-  // Function to update the legend based on the current metric and data
+  // Unified updateLegend function:
   const updateLegend = () => {
     if (!map.current) return;
     const legend = document.getElementById('legend');
     if (!legend) return;
-    // Hide legend for non-mapped layers
-    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer)) {
+    if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
+      legend.style.display = 'block';
       legend.innerHTML = '';
-      legend.style.display = 'none';
+      const title = document.createElement('div');
+      title.textContent = activeLayer === 'exceedance_8' ? 'Exceedance Category (8 µg/m³)' : 'Exceedance Category (9 µg/m³)';
+      title.style.marginBottom = '8px';
+      title.style.fontWeight = 'bold';
+      title.style.fontSize = '1.08em';
+      legend.appendChild(title);
+      // Color boxes and labels
+      for (let i = 1; i <= 4; i++) {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.marginBottom = '7px';
+        row.style.marginLeft = '2px';
+        const colorBox = document.createElement('span');
+        colorBox.style.display = 'inline-block';
+        colorBox.style.width = '18px';
+        colorBox.style.height = '18px';
+        colorBox.style.minWidth = '18px';
+        colorBox.style.minHeight = '18px';
+        colorBox.style.background = EXCEEDANCE_COLORS[i][1];
+        colorBox.style.marginRight = '10px';
+        colorBox.style.border = '1.5px solid #888';
+        colorBox.style.borderRadius = '3px';
+        row.appendChild(colorBox);
+        const label = document.createElement('span');
+        label.textContent = `${i}: ${categoryMeanings[i]}`;
+        label.style.fontSize = '0.98em';
+        label.style.paddingLeft = '2px';
+        row.appendChild(label);
+        legend.appendChild(row);
+      }
       return;
     }
     // Otherwise, show and update legend
@@ -345,16 +387,16 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     labels.style.justifyContent = 'space-between';
     labels.style.fontSize = '0.8em';
     const minLabel = document.createElement('span');
-    if (activeLayer === 'yll') {
-      minLabel.textContent = colorScale[0][0].toFixed(0);
+    if (activeLayer === 'yll' || activeLayer === 'population') {
+      minLabel.textContent = colorScale[0][0].toLocaleString(undefined, { maximumFractionDigits: 0 });
     } else if (activeLayer === 'mortality') {
       minLabel.textContent = colorScale[0][0].toFixed(3) + '%';
     } else {
       minLabel.textContent = colorScale[0][0].toFixed(1);
     }
     const maxLabel = document.createElement('span');
-    if (activeLayer === 'yll') {
-      maxLabel.textContent = colorScale[colorScale.length - 1][0].toFixed(0);
+    if (activeLayer === 'yll' || activeLayer === 'population') {
+      maxLabel.textContent = colorScale[colorScale.length - 1][0].toLocaleString(undefined, { maximumFractionDigits: 0 });
     } else if (activeLayer === 'mortality') {
       maxLabel.textContent = `${colorScale[colorScale.length - 1][0].toFixed(3)}%+`;
     } else {
@@ -585,14 +627,14 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
 
   // Initialize map when component mounts
   useEffect(() => {
-    console.log('Map initialization useEffect triggered:', { activeLayer, pm25SubLayer, PM25_LAYERS: PM25_LAYERS.includes(activeLayer), HEALTH_LAYERS: HEALTH_LAYERS.includes(activeLayer) });
+    console.log('Map initialization useEffect triggered:', { activeLayer, pm25SubLayer, PM25_LAYERS: PM25_LAYERS.includes(activeLayer), HEALTH_LAYERS: HEALTH_LAYERS.includes(activeLayer), EXCEEDANCE_LAYERS: EXCEEDANCE_LAYERS.includes(activeLayer) });
 
     if (!mapboxToken) {
       setError('Mapbox token is missing');
       return;
     }
     if (!mapContainer.current) return;
-    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer)) return;
+    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer) && !EXCEEDANCE_LAYERS.includes(activeLayer)) return;
     // For PM2.5 layers, require sub-layer selection
     if (PM25_LAYERS.includes(activeLayer) && !pm25SubLayer) return;
 
@@ -687,6 +729,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     if (activeLayer === 'population') {
       return POPULATION_COLORS;
     }
+    if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
+      return EXCEEDANCE_COLORS;
+    }
 
     // If we have data, calculate dynamic scale for PM2.5 layers
     if (data) {
@@ -727,17 +772,31 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     return labels[metric] || 'PM2.5';
   };
 
+  // Helper function to get metric property for exceedance
+  const getExceedanceMetricProperty = () => {
+    if (activeLayer === 'exceedance_8') return 'threshold_8';
+    if (activeLayer === 'exceedance_9') return 'threshold_9';
+    return null;
+  };
+
   // Update map layers when choroplethData, activeMetric, or subMetric changes
   useEffect(() => {
     console.log('Map layer rendering useEffect triggered:', { activeLayer, choroplethData: !!choroplethData, mapLoaded: map.current?.isStyleLoaded() });
 
-    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer)) return;
+    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer) && !EXCEEDANCE_LAYERS.includes(activeLayer)) return;
     if (!map.current || !choroplethData) return;
     if (!map.current.isStyleLoaded()) return;
 
     console.log('Rendering map layer for:', activeLayer);
     const mapInstance = map.current;
-    const metricForColor = (activeLayer === 'mortality') ? 'value' : getMetricProperty();
+    let metricForColor;
+    if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
+      metricForColor = getExceedanceMetricProperty();
+    } else if (activeLayer === 'mortality') {
+      metricForColor = 'value';
+    } else {
+      metricForColor = getMetricProperty();
+    }
     console.log('Using metric for color:', metricForColor);
 
     // Remove the layer if it exists
@@ -778,7 +837,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
 
   // Update mousemove handler to send county info to sidebar
   useEffect(() => {
-    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer)) return;
+    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer) && !EXCEEDANCE_LAYERS.includes(activeLayer)) return;
     if (!map.current) return;
     const mapInstance = map.current;
 
@@ -805,12 +864,18 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
               );
             } else if (activeLayer === 'mortality') {
               barChartData = await fetchMortalityBarChartData(countyId);
+            } else if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
+              // For exceedance, just show the tier
+              const tier = props[getExceedanceMetricProperty()] ?? 0;
+              barChartData = [{ tier, label: props.NAME || 'Unknown County' }];
             }
           } catch (err) { }
           const countyName = props.county_name || props.NAME || 'Unknown County';
           let value;
           if (activeLayer === 'mortality') {
             value = props.value || 0;
+          } else if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
+            value = props[getExceedanceMetricProperty()] ?? 0;
           } else {
             const metricProperty = getMetricProperty();
             value = props[metricProperty] || 0;
@@ -844,12 +909,20 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
             month,
             season,
             subMetric,
-            activeLayer
+            activeLayer,
+            // Always include both thresholds for exceedance layers
+            ...(EXCEEDANCE_LAYERS.includes(activeLayer) ? {
+              threshold_8: props.threshold_8,
+              threshold_9: props.threshold_9
+            } : {})
           };
           if (onCountyHover) onCountyHover(countyData);
           if (popup.current) {
             let formattedValue;
-            if (activeLayer === 'population') {
+            if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
+              const meaning = categoryMeanings[value] || '';
+              formattedValue = `${value}`;
+            } else if (activeLayer === 'population') {
               formattedValue = value !== undefined ? value.toLocaleString() : 'N/A';
             } else if (activeLayer === 'mortality') {
               formattedValue = (typeof value === 'number') ? value.toFixed(3) + '%' : 'N/A';
@@ -890,6 +963,8 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
         let value;
         if (activeLayer === 'mortality') {
           value = props.value || 0;
+        } else if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
+          value = props[getExceedanceMetricProperty()] ?? 0;
         } else {
           const metricProperty = getMetricProperty();
           value = props[metricProperty] || 0;
@@ -908,6 +983,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
             );
           } else if (activeLayer === 'mortality') {
             barChartData = await fetchMortalityBarChartData(countyId);
+          } else if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
+            const tier = value;
+            barChartData = [{ tier, label: countyName }];
           }
         } catch (err) {
           console.error('Error fetching bar chart data for selection:', err);
@@ -942,7 +1020,12 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
           month,
           season,
           subMetric,
-          activeLayer
+          activeLayer,
+          // Always include both thresholds for exceedance layers
+          ...(EXCEEDANCE_LAYERS.includes(activeLayer) ? {
+            threshold_8: props.threshold_8,
+            threshold_9: props.threshold_9
+          } : {})
         };
         if (onCountySelect) onCountySelect(countyData);
       } else {
