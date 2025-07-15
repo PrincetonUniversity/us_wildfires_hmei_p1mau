@@ -54,11 +54,11 @@ const MORTALITY_COLORS = [
 
 // Color scale for exceedance values (transparent to distinct colors)
 const EXCEEDANCE_COLORS = [
-  [0, 'rgba(0,0,0,0)'], // transparent for below threshold
-  [1, '#b2ebf2'],      // 
-  [2, '#4dd0e1'],      // 
-  [3, '#00838f'],      // 
-  [4, '#d32f2f']       // 
+  [0, 'rgba(0,0,0,0)'],
+  [1, '#d61515'],
+  [2, '#f78686'],
+  [3, '#a8a8a8'],
+  [4, '#3fc1d4'],
 ];
 
 // State FIPS to abbreviation mapping
@@ -315,10 +315,10 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     // Custom label for mortality/YLL
     if (activeLayer === 'mortality' || activeLayer === 'yll') {
       if (activeLayer === 'yll') {
-        metricLabel = 'Years of Life Lost (YLL)';
+        metricLabel = 'Normalized YLL (fraction of possible years lost)';
         // For YLL, use the selected subMetric property
         if (choroplethData && choroplethData.features && choroplethData.features.length > 0) {
-          const metricProp = getMetricProperty();
+          const metricProp = 'value';
           const values = choroplethData.features.map(f => f.properties[metricProp]).filter(v => typeof v === 'number' && isFinite(v));
           if (values.length > 0) {
             const min = Math.min(...values);
@@ -387,7 +387,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     labels.style.justifyContent = 'space-between';
     labels.style.fontSize = '0.8em';
     const minLabel = document.createElement('span');
-    if (activeLayer === 'yll' || activeLayer === 'population') {
+    if (activeLayer === 'yll') {
+      minLabel.textContent = (colorScale[0][0] * 100).toFixed(2) + '%';
+    } else if (activeLayer === 'population') {
       minLabel.textContent = colorScale[0][0].toLocaleString(undefined, { maximumFractionDigits: 0 });
     } else if (activeLayer === 'mortality') {
       minLabel.textContent = colorScale[0][0].toFixed(3) + '%';
@@ -395,7 +397,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
       minLabel.textContent = colorScale[0][0].toFixed(1);
     }
     const maxLabel = document.createElement('span');
-    if (activeLayer === 'yll' || activeLayer === 'population') {
+    if (activeLayer === 'yll') {
+      maxLabel.textContent = (colorScale[colorScale.length - 1][0] * 100).toFixed(2) + '%+';
+    } else if (activeLayer === 'population') {
       maxLabel.textContent = colorScale[colorScale.length - 1][0].toLocaleString(undefined, { maximumFractionDigits: 0 });
     } else if (activeLayer === 'mortality') {
       maxLabel.textContent = `${colorScale[colorScale.length - 1][0].toFixed(3)}%+`;
@@ -792,7 +796,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     let metricForColor;
     if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
       metricForColor = getExceedanceMetricProperty();
-    } else if (activeLayer === 'mortality') {
+    } else if (activeLayer === 'mortality' || activeLayer === 'yll') {
       metricForColor = 'value';
     } else {
       metricForColor = getMetricProperty();
@@ -872,7 +876,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
           } catch (err) { }
           const countyName = props.county_name || props.NAME || 'Unknown County';
           let value;
-          if (activeLayer === 'mortality') {
+          if (activeLayer === 'mortality' || activeLayer == 'yll') {
             value = props.value || 0;
           } else if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
             value = props[getExceedanceMetricProperty()] ?? 0;
@@ -924,8 +928,8 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
               formattedValue = `${value}`;
             } else if (activeLayer === 'population') {
               formattedValue = value !== undefined ? value.toLocaleString() : 'N/A';
-            } else if (activeLayer === 'mortality') {
-              formattedValue = (typeof value === 'number') ? value.toFixed(3) + '%' : 'N/A';
+            } else if (activeLayer === 'mortality' || activeLayer === 'yll') {
+              formattedValue = (typeof value === 'number') ? (value * 100).toFixed(3) + '%' : 'N/A';
             } else if (typeof value === 'number' && Math.abs(value) >= 1000) {
               formattedValue = value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             } else if (typeof value === 'number') {

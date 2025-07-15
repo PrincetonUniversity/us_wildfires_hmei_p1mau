@@ -179,7 +179,7 @@ function App() {
         </DialogContent>
         <DialogContent>
           <Typography textAlign="center" variant="body2" color="text.secondary" gutterBottom>
-            <b>Data Sources:</b> PM2.5 and health data are sourced from public datasets including EPA Air Quality System (AQS), CDC Wonder, and US Census. See documentation for details.
+            <b>Data Sources:</b> Data is sourced from public datasets including ____, and US Census.
           </Typography>
         </DialogContent>
         <DialogContent>
