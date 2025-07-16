@@ -22,7 +22,7 @@ from db.database import SessionLocal, engine, Base
 from db.models import (
     DailyPM25, County, Population,
     YearlyPM25Summary, MonthlyPM25Summary, SeasonalPM25Summary,
-    BaselineMortalityRate, ExcessMortalitySummary, ExceedanceSummary
+    BaselineMortalityRate, ExcessMortalitySummary, ExceedanceSummary, DecompositionSummary
 )
 
 import geopandas as gpd
@@ -875,6 +875,40 @@ async def get_choropleth_yll(
 
 # Register the router
 app.include_router(choropleth_router)
+
+@app.get("/api/counties/decomp/{fips}")
+def get_county_decomposition_info(
+    fips: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get decomposition summary and county info for a given county FIPS.
+    Returns the latest available decomposition result.
+    """
+    county = db.query(County).filter(County.fips == fips).first()
+    if not county:
+        raise HTTPException(status_code=404, detail="County not found")
+
+    decomp = db.query(DecompositionSummary)\
+        .filter(DecompositionSummary.fips == fips, DecompositionSummary.age_group == None)\
+        .order_by(DecompositionSummary.end_year.desc())\
+        .first()
+    if not decomp:
+        raise HTTPException(status_code=404, detail="Decomposition summary not found for this county")
+
+    return {
+        "fips": county.fips,
+        "county_name": county.name,
+        "start_year": decomp.start_year,
+        "end_year": decomp.end_year,
+        "decomposition": {
+            "population_growth": decomp.population_growth,
+            "population_ageing": decomp.population_ageing,
+            "baseline_mortality_change": decomp.baseline_mortality_change,
+            "exposure_change": decomp.exposure_change,
+            "total_change": decomp.total_change
+        }
+    }
 
 @app.get("/api/pm25/bar_chart/{fips}")
 async def get_bar_chart_data(

@@ -157,6 +157,7 @@ const Sidebar = ({
             <Box sx={{
                 flex: '1 1 auto',
                 minHeight: 0,
+                maxHeight: 'calc(100vh - 250px)',
                 overflowY: 'auto',
                 p: 2,
                 background: 'rgba(255,255,255,0.85)',

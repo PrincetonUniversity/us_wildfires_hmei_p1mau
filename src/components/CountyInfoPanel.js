@@ -3,6 +3,7 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import CountyBarChart from './CountyBarChart';
 import CountyMortalityBarChart from './CountyMortalityBarChart';
+import CountyDecompositionChart from './CountyDecompositionChart';
 
 const categoryMeanings = [
     'Below threshold',
@@ -38,6 +39,7 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
         y0,
         delta_mortality,
         barChartData,
+        decompositionData,
         timeScale,
         year,
         month,
@@ -125,7 +127,7 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
     }
 
     return (
-        <Box sx={{ fontSize: '0.97em', p: 0.5, position: 'relative' }}>
+        <Box sx={{ fontSize: '0.97em', p: 0.5, pb: 2, position: 'relative' }}>
             {/* X button for clearing selection */}
             {onClearSelectedCounty && (
                 <button
@@ -189,7 +191,7 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
                 </Box>
             )}
             {isBarChartDataForCurrentTimeScale() && (
-                <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
+                <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
                     <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: '1em', mb: 0.5 }}>
                         {activeLayer === 'mortality' ? 'Excess Mortality Bar Chart' : activeLayer === 'yll' ? 'YLL Bar Chart' : 'PM2.5 Bar Chart'}
                         <span style={{ fontWeight: 'normal', fontSize: '0.8em', color: '#888', marginLeft: 8 }}>
@@ -203,6 +205,19 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
                     ) : (
                         <CountyBarChart key={timeScale} data={barChartData} timeScale={timeScale} />
                     )}
+                </Box>
+            )}
+
+            {/* Decomposition Analysis Chart */}
+            {decompositionData && activeLayer === 'mortality' && (
+                <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
+                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: '1em', mb: 0.5 }}>
+                        Decomposition Analysis (2013–2023)
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.8em', mb: 0.5 }}>
+                        Factor contribution to change in excess mortality
+                    </Typography>
+                    <CountyDecompositionChart decompositionData={decompositionData} />
                 </Box>
             )}
         </Box>

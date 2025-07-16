@@ -629,6 +629,18 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     }
   };
 
+  // Function to fetch decomposition data for a specific county
+  const fetchDecompositionData = async (fips) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/counties/decomp/${fips}`);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data.decomposition;
+    } catch {
+      return null;
+    }
+  };
+
   // Initialize map when component mounts
   useEffect(() => {
     console.log('Map initialization useEffect triggered:', { activeLayer, pm25SubLayer, PM25_LAYERS: PM25_LAYERS.includes(activeLayer), HEALTH_LAYERS: HEALTH_LAYERS.includes(activeLayer), EXCEEDANCE_LAYERS: EXCEEDANCE_LAYERS.includes(activeLayer) });
@@ -857,6 +869,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
           currentCountyRef.current = countyId;
           mapInstance.getCanvas().style.cursor = 'pointer';
           let barChartData = [];
+          let decompositionData = null;
           try {
             if (PM25_LAYERS.includes(activeLayer)) {
               barChartData = await fetchBarChartData(
@@ -872,6 +885,11 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
               // For exceedance, just show the tier
               const tier = props[getExceedanceMetricProperty()] ?? 0;
               barChartData = [{ tier, label: props.NAME || 'Unknown County' }];
+            }
+
+            // Fetch decomposition data only for mortality layer
+            if (activeLayer === 'mortality') {
+              decompositionData = await fetchDecompositionData(countyId);
             }
           } catch (err) { }
           const countyName = props.county_name || props.NAME || 'Unknown County';
@@ -908,6 +926,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
             yll_fire: props.yll_fire,
             yll_nonfire: props.yll_nonfire,
             barChartData,
+            decompositionData,
             timeScale,
             year,
             month,
@@ -976,6 +995,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
 
         // Fetch bar chart data for selected county
         let barChartData = [];
+        let decompositionData = null;
         try {
           if (PM25_LAYERS.includes(activeLayer)) {
             barChartData = await fetchBarChartData(
@@ -990,6 +1010,11 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
           } else if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
             const tier = value;
             barChartData = [{ tier, label: countyName }];
+          }
+
+          // Fetch decomposition data only for mortality layer
+          if (activeLayer === 'mortality') {
+            decompositionData = await fetchDecompositionData(countyId);
           }
         } catch (err) {
           console.error('Error fetching bar chart data for selection:', err);
@@ -1019,6 +1044,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
           yll_fire: props.yll_fire,
           yll_nonfire: props.yll_nonfire,
           barChartData,
+          decompositionData,
           timeScale,
           year,
           month,
