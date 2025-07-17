@@ -11,13 +11,7 @@ geopandas==0.12.2
 fiona==1.8.22
 shapely==2.0.1
 pyproj==3.4.0
-jupyter
-matplotlib
 
 # Auth
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-
-# Development
-setuptools==69.2.0
-wheel==0.43.0

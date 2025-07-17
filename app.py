@@ -1,33 +1,29 @@
 import logging
+import warnings
 from contextlib import asynccontextmanager
 from datetime import datetime, date
-from pathlib import Path
 from typing import Optional
 import os
+import math
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
-import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, Depends, status, Request, Response, BackgroundTasks, APIRouter
+from fastapi import FastAPI, HTTPException, Query, Depends, status, BackgroundTasks, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from fastapi.encoders import jsonable_encoder
-from sqlalchemy import func, and_, or_, extract, select, text
+from sqlalchemy import func, and_, extract
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from concurrent.futures import ThreadPoolExecutor
-import math
+import geopandas as gpd
+from shapely.geometry import mapping
 
 # Application imports
-from db.database import SessionLocal, engine, Base
+from db.database import SessionLocal
 from db.models import (
     DailyPM25, County, Population,
     YearlyPM25Summary, MonthlyPM25Summary, SeasonalPM25Summary,
-    BaselineMortalityRate, ExcessMortalitySummary, ExceedanceSummary, DecompositionSummary
+    ExcessMortalitySummary, ExceedanceSummary, DecompositionSummary
 )
-
-import geopandas as gpd
-from shapely.geometry import mapping
-import warnings
 
 # Suppress warnings from GeoPandas
 warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
@@ -84,10 +80,10 @@ def load_county_geometries():
                 }
                 COUNTY_GEOMETRIES[row['FIPS']] = feature['geometry']
             
-            logger.info(f"Loaded {len(COUNTY_GEOMETRIES)} county geometries")
+            logger.info("Loaded %d county geometries", len(COUNTY_GEOMETRIES))
             
         except Exception as e:
-            logger.error(f"Error loading county geometries: {str(e)}", exc_info=True)
+            logger.error("Error loading county geometries: %s", str(e), exc_info=True)
             COUNTY_GEOMETRIES = {}
     
     return COUNTY_GEOMETRIES
@@ -131,7 +127,7 @@ def get_db():
     try:
         yield db
     except SQLAlchemyError as e:
-        logger.error(f"Database error: {str(e)}")
+        logger.error("Database error: %s", str(e))
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -310,10 +306,10 @@ async def preprocess_summary_data(db: Session):
         db.bulk_save_objects(seasonal_summaries)
         db.commit()
         
-        logger.info(f"Preprocessed {len(yearly_summaries)} yearly, {len(monthly_summaries)} monthly, and {len(seasonal_summaries)} seasonal summaries")
+        logger.info("Preprocessed %d yearly, %d monthly, and %d seasonal summaries", len(yearly_summaries), len(monthly_summaries), len(seasonal_summaries))
         
     except Exception as e:
-        logger.error(f"Error in preprocessing: {str(e)}", exc_info=True)
+        logger.error("Error in preprocessing: %s", str(e), exc_info=True)
         db.rollback()
         raise
 
@@ -572,7 +568,7 @@ async def get_choropleth_mortality(
             }
         }
     except Exception as e:
-        logger.error(f"Error in mortality choropleth: {str(e)}", exc_info=True)
+        logger.error("Error in mortality choropleth: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @choropleth_router.get("/average")
@@ -752,7 +748,7 @@ async def get_choropleth_population(
         }
         
     except Exception as e:
-        logger.error(f"Error in population choropleth: {str(e)}", exc_info=True)
+        logger.error("Error in population choropleth: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @choropleth_router.get("/yll")
@@ -870,7 +866,7 @@ async def get_choropleth_yll(
             }
         }
     except Exception as e:
-        logger.error(f"Error in YLL choropleth: {str(e)}", exc_info=True)
+        logger.error("Error in YLL choropleth: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Register the router
@@ -1103,7 +1099,7 @@ async def get_bar_chart_data(
         return data
         
     except Exception as e:
-        logger.error(f"Error in bar chart data: {str(e)}", exc_info=True)
+        logger.error("Error in bar chart data: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/counties/statistics")
@@ -1185,7 +1181,7 @@ async def get_county_statistics(
         }
         
     except Exception as e:
-        logger.error(f"Error in statistics: {str(e)}", exc_info=True)
+        logger.error("Error in statistics: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/excess_mortality")
@@ -1267,7 +1263,7 @@ def get_excess_mortality_summary(
             })
         return results
     except Exception as e:
-        logger.error(f"Error in excess mortality summary endpoint: {str(e)}", exc_info=True)
+        logger.error("Error in excess mortality summary endpoint: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/counties/exceedance")
@@ -1314,7 +1310,7 @@ def get_exceedance_summary(db: Session = Depends(get_db)):
             }
         }
     except Exception as e:
-        logger.error(f"Error in exceedance summary endpoint: {str(e)}", exc_info=True)
+        logger.error("Error in exceedance summary endpoint: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Health check endpoint
@@ -1329,7 +1325,6 @@ async def read_root():
 
 if __name__ == "__main__":
     import uvicorn
-    import logging
     
     # Configure Uvicorn logging
     log_config = uvicorn.config.LOGGING_CONFIG
