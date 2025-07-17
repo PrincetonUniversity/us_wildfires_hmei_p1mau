@@ -26,7 +26,8 @@ from db.models import (
 )
 
 # Suppress warnings from GeoPandas
-warnings.filterwarnings('ignore', message='.*initial implementation of Parquet.*')
+warnings.filterwarnings(
+    'ignore', message='.*initial implementation of Parquet.*')
 
 # Configure logging
 logging.basicConfig(
@@ -47,7 +48,6 @@ executor = ThreadPoolExecutor(max_workers=4)
 
 # Load county geometries once at startup
 COUNTY_GEOMETRIES = None
-
 def load_county_geometries():
     """Load county geometries from the shapefile and cache them."""
     global COUNTY_GEOMETRIES
@@ -58,13 +58,13 @@ def load_county_geometries():
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 'data', 'shapefiles', 'cb_2018_us_county_20m.shp'
             )
-            
+
             # Read the shapefile
             gdf = gpd.read_file(shapefile_path)
-            
+
             # Create a FIPS code column by combining state and county codes
             gdf['FIPS'] = gdf['STATEFP'] + gdf['COUNTYFP']
-            
+
             # Convert to GeoJSON and index by FIPS code
             COUNTY_GEOMETRIES = {}
             for _, row in gdf.iterrows():
@@ -79,13 +79,14 @@ def load_county_geometries():
                     }
                 }
                 COUNTY_GEOMETRIES[row['FIPS']] = feature['geometry']
-            
+
             logger.info("Loaded %d county geometries", len(COUNTY_GEOMETRIES))
-            
+
         except Exception as e:
-            logger.error("Error loading county geometries: %s", str(e), exc_info=True)
+            logger.error("Error loading county geometries: %s",
+                         str(e), exc_info=True)
             COUNTY_GEOMETRIES = {}
-    
+
     return COUNTY_GEOMETRIES
 
 # Application lifespan
@@ -93,12 +94,12 @@ def load_county_geometries():
 async def lifespan(app: FastAPI):
     # Startup: Initialize resources
     logger.info("Starting up...")
-    
+
     # Load county geometries
     load_county_geometries()
-    
+
     yield
-    
+
     # Shutdown: Clean up resources
     logger.info("Shutting down...")
     executor.shutdown(wait=True)
@@ -155,6 +156,7 @@ def get_season_date_range(year: int, season: str):
         raise ValueError("Invalid season")
     return start_date, end_date
 
+
 def parse_flexible_date(date_str: str) -> date:
     """Parse a date string into a date object with flexible format."""
     try:
@@ -170,11 +172,12 @@ def parse_flexible_date(date_str: str) -> date:
             detail=f"Invalid date format: {date_str}. Use YYYY, YYYY-MM, or YYYY-MM-DD."
         ) from e
 
+
 def get_season_from_date(date_obj: date) -> str:
     """Determine season from a date."""
     month = date_obj.month
     day = date_obj.day
-    
+
     if (month == 12 and day >= 21) or month in [1, 2] or (month == 3 and day < 21):
         return "winter"
     elif (month == 3 and day >= 21) or month in [4, 5] or (month == 6 and day < 21):
@@ -189,12 +192,12 @@ async def preprocess_summary_data(db: Session):
     """Preprocess and populate summary tables for faster queries."""
     try:
         logger.info("Starting data preprocessing...")
-        
+
         # Clear existing summary data
         db.query(YearlyPM25Summary).delete()
         db.query(MonthlyPM25Summary).delete()
         db.query(SeasonalPM25Summary).delete()
-        
+
         # Generate yearly summaries
         yearly_query = db.query(
             DailyPM25.fips,
@@ -209,10 +212,10 @@ async def preprocess_summary_data(db: Session):
             DailyPM25.fips,
             extract('year', DailyPM25.date)
         )
-        
+
         yearly_results = yearly_query.all()
         yearly_summaries = []
-        
+
         for result in yearly_results:
             yearly_summaries.append(YearlyPM25Summary(
                 fips=result.fips,
@@ -224,9 +227,9 @@ async def preprocess_summary_data(db: Session):
                 max_fire=float(result.max_fire),
                 days_count=int(result.days_count)
             ))
-        
+
         db.bulk_save_objects(yearly_summaries)
-        
+
         # Generate monthly summaries
         monthly_query = db.query(
             DailyPM25.fips,
@@ -243,10 +246,10 @@ async def preprocess_summary_data(db: Session):
             extract('year', DailyPM25.date),
             extract('month', DailyPM25.date)
         )
-        
+
         monthly_results = monthly_query.all()
         monthly_summaries = []
-        
+
         for result in monthly_results:
             monthly_summaries.append(MonthlyPM25Summary(
                 fips=result.fips,
@@ -259,36 +262,36 @@ async def preprocess_summary_data(db: Session):
                 max_fire=float(result.max_fire),
                 days_count=int(result.days_count)
             ))
-        
+
         db.bulk_save_objects(monthly_summaries)
-        
+
         # Generate seasonal summaries
         daily_data = db.query(DailyPM25).all()
         seasonal_data = {}
-        
+
         for record in daily_data:
             season = get_season_from_date(record.date)
             year = record.date.year
-            
+
             # Adjust year for winter season
             if season == "winter" and record.date.month in [1, 2, 3]:
                 year = year  # Winter belongs to the ending year
             elif season == "winter" and record.date.month == 12:
                 year = year + 1  # December belongs to next year's winter
-            
+
             key = (record.fips, year, season)
-            
+
             if key not in seasonal_data:
                 seasonal_data[key] = {
                     'total_values': [],
                     'fire_values': [],
                     'nonfire_values': []
                 }
-            
+
             seasonal_data[key]['total_values'].append(record.total)
             seasonal_data[key]['fire_values'].append(record.fire)
             seasonal_data[key]['nonfire_values'].append(record.nonfire)
-        
+
         seasonal_summaries = []
         for (fips, year, season), values in seasonal_data.items():
             seasonal_summaries.append(SeasonalPM25Summary(
@@ -302,19 +305,19 @@ async def preprocess_summary_data(db: Session):
                 max_fire=float(np.max(values['fire_values'])),
                 days_count=len(values['total_values'])
             ))
-        
+
         db.bulk_save_objects(seasonal_summaries)
         db.commit()
-        
-        logger.info("Preprocessed %d yearly, %d monthly, and %d seasonal summaries", len(yearly_summaries), len(monthly_summaries), len(seasonal_summaries))
-        
+
+        logger.info("Preprocessed %d yearly, %d monthly, and %d seasonal summaries", len(
+            yearly_summaries), len(monthly_summaries), len(seasonal_summaries))
+
     except Exception as e:
         logger.error("Error in preprocessing: %s", str(e), exc_info=True)
         db.rollback()
         raise
 
 # API Endpoints
-
 @app.post("/api/admin/preprocess")
 async def trigger_preprocessing(
     background_tasks: BackgroundTasks,
@@ -328,7 +331,8 @@ async def trigger_preprocessing(
 def build_choropleth_query(db, time_scale, year, month, season, summary_model):
     if time_scale == "yearly":
         if not year:
-            raise HTTPException(status_code=400, detail="Year required for yearly data")
+            raise HTTPException(
+                status_code=400, detail="Year required for yearly data")
         query = db.query(
             summary_model.fips,
             County.name.label("county_name"),
@@ -357,7 +361,8 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
         )
     elif time_scale == "monthly":
         if not year or not month:
-            raise HTTPException(status_code=400, detail="Year and month required for monthly data")
+            raise HTTPException(
+                status_code=400, detail="Year and month required for monthly data")
         query = db.query(
             summary_model.fips,
             County.name.label("county_name"),
@@ -387,7 +392,8 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
         )
     elif time_scale == "seasonal":
         if not year or not season:
-            raise HTTPException(status_code=400, detail="Year and season required for seasonal data")
+            raise HTTPException(
+                status_code=400, detail="Year and season required for seasonal data")
         query = db.query(
             summary_model.fips,
             County.name.label("county_name"),
@@ -419,6 +425,7 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
         raise HTTPException(status_code=400, detail="Invalid time_scale")
     return query
 
+
 def build_geojson_features(results, value_func):
     features = []
     for row in results:
@@ -446,8 +453,10 @@ def build_geojson_features(results, value_func):
         features.append(feature)
     return features
 
+
 # --- New Modular Endpoints ---
-choropleth_router = APIRouter(prefix="/api/counties/choropleth", tags=["Choropleth"])
+choropleth_router = APIRouter(
+    prefix="/api/counties/choropleth", tags=["Choropleth"])
 
 # Add a helper to sanitize float values for JSON
 def safe_float(val):
@@ -455,11 +464,14 @@ def safe_float(val):
         return 0.0
     return float(val)
 
+
 @choropleth_router.get("/mortality")
 async def get_choropleth_mortality(
     year: int = Query(..., description="Year required for mortality data"),
-    sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$", description="Which excess mortality to return: total, fire, or nonfire"),
-    age_group: Optional[str] = Query(None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
+    sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$",
+                            description="Which excess mortality to return: total, fire, or nonfire"),
+    age_group: Optional[str] = Query(
+        None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
     db: Session = Depends(get_db)
 ):
     """Get mortality impact choropleth data (precomputed summary, total/fire/nonfire), optionally by age group(s)."""
@@ -483,14 +495,18 @@ async def get_choropleth_mortality(
         )
         age_group_list = None
         if age_group is not None and age_group.strip() != '':
-            age_group_list = [int(x) for x in age_group.split(',') if x.strip().isdigit()]
+            age_group_list = [int(x) for x in age_group.split(
+                ',') if x.strip().isdigit()]
         if age_group_list:
             # Sum over selected age groups for each county
             subq = db.query(
                 ExcessMortalitySummary.fips,
-                func.sum(ExcessMortalitySummary.total_excess).label("total_excess"),
-                func.sum(ExcessMortalitySummary.fire_excess).label("fire_excess"),
-                func.sum(ExcessMortalitySummary.nonfire_excess).label("nonfire_excess"),
+                func.sum(ExcessMortalitySummary.total_excess).label(
+                    "total_excess"),
+                func.sum(ExcessMortalitySummary.fire_excess).label(
+                    "fire_excess"),
+                func.sum(ExcessMortalitySummary.nonfire_excess).label(
+                    "nonfire_excess"),
                 func.sum(ExcessMortalitySummary.population).label("population")
             ).filter(
                 ExcessMortalitySummary.year == year,
@@ -509,9 +525,12 @@ async def get_choropleth_mortality(
             # Sum over all age groups for each county-year
             subq = db.query(
                 ExcessMortalitySummary.fips,
-                func.sum(ExcessMortalitySummary.total_excess).label("total_excess"),
-                func.sum(ExcessMortalitySummary.fire_excess).label("fire_excess"),
-                func.sum(ExcessMortalitySummary.nonfire_excess).label("nonfire_excess"),
+                func.sum(ExcessMortalitySummary.total_excess).label(
+                    "total_excess"),
+                func.sum(ExcessMortalitySummary.fire_excess).label(
+                    "fire_excess"),
+                func.sum(ExcessMortalitySummary.nonfire_excess).label(
+                    "nonfire_excess"),
                 func.sum(ExcessMortalitySummary.population).label("population")
             ).filter(
                 ExcessMortalitySummary.year == year
@@ -568,8 +587,10 @@ async def get_choropleth_mortality(
             }
         }
     except Exception as e:
-        logger.error("Error in mortality choropleth: %s", str(e), exc_info=True)
+        logger.error("Error in mortality choropleth: %s",
+                     str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @choropleth_router.get("/average")
 async def get_choropleth_average(
@@ -586,7 +607,8 @@ async def get_choropleth_average(
         "monthly": MonthlyPM25Summary,
         "seasonal": SeasonalPM25Summary
     }[time_scale]
-    query = build_choropleth_query(db, time_scale, year, month, season, summary_model)
+    query = build_choropleth_query(
+        db, time_scale, year, month, season, summary_model)
     results = query.all()
     col_map = {
         "total": "avg_total",
@@ -594,6 +616,7 @@ async def get_choropleth_average(
         "nonfire": "avg_nonfire"
     }
     col_name = col_map.get(sub_metric, "avg_total")
+
     def value_func(row):
         return float(getattr(row, col_name) or 0)
     features = build_geojson_features(results, value_func)
@@ -609,6 +632,7 @@ async def get_choropleth_average(
             "feature_count": len(features)
         }
     }
+
 
 @choropleth_router.get("/max")
 async def get_choropleth_max(
@@ -625,7 +649,8 @@ async def get_choropleth_max(
         "monthly": MonthlyPM25Summary,
         "seasonal": SeasonalPM25Summary
     }[time_scale]
-    query = build_choropleth_query(db, time_scale, year, month, season, summary_model)
+    query = build_choropleth_query(
+        db, time_scale, year, month, season, summary_model)
     results = query.all()
     col_map = {
         "total": "max_total",
@@ -633,6 +658,7 @@ async def get_choropleth_max(
         "nonfire": "max_nonfire"
     }
     col_name = col_map.get(sub_metric, "max_total")
+
     def value_func(row):
         return float(getattr(row, col_name) or 0)
     features = build_geojson_features(results, value_func)
@@ -648,6 +674,7 @@ async def get_choropleth_max(
             "feature_count": len(features)
         }
     }
+
 
 @choropleth_router.get("/pop_weighted")
 async def get_choropleth_pop_weighted(
@@ -664,7 +691,8 @@ async def get_choropleth_pop_weighted(
         "monthly": MonthlyPM25Summary,
         "seasonal": SeasonalPM25Summary
     }[time_scale]
-    query = build_choropleth_query(db, time_scale, year, month, season, summary_model)
+    query = build_choropleth_query(
+        db, time_scale, year, month, season, summary_model)
     results = query.all()
     col_map = {
         "total": "pop_weighted_total",
@@ -672,6 +700,7 @@ async def get_choropleth_pop_weighted(
         "nonfire": "pop_weighted_nonfire"
     }
     col_name = col_map.get(sub_metric, "pop_weighted_total")
+
     def value_func(row):
         return float(getattr(row, col_name) or 0)
     features = build_geojson_features(results, value_func)
@@ -688,9 +717,11 @@ async def get_choropleth_pop_weighted(
         }
     }
 
+
 @choropleth_router.get("/population")
 async def get_choropleth_population(
-    year: Optional[int] = Query(2020, description="Year for population data (optional, defaults to 2020)"),
+    year: Optional[int] = Query(
+        2020, description="Year for population data (optional, defaults to 2020)"),
     db: Session = Depends(get_db)
 ):
     """Get population choropleth data."""
@@ -710,20 +741,20 @@ async def get_choropleth_population(
         ).filter(
             ~County.fips.startswith('72')  # Exclude Puerto Rico
         )
-        
+
         results = query.all()
         features = []
-        
+
         for row in results:
             if not row.geometry:
                 continue
-                
+
             pop = row.population or 0
-            
+
             # Ensure valid number
             if pop is None or not math.isfinite(pop):
                 pop = 0
-            
+
             feature = {
                 "type": "Feature",
                 "geometry": row.geometry,
@@ -735,7 +766,7 @@ async def get_choropleth_population(
                 }
             }
             features.append(feature)
-        
+
         return {
             "type": "FeatureCollection",
             "features": features,
@@ -746,16 +777,20 @@ async def get_choropleth_population(
                 "feature_count": len(features)
             }
         }
-        
+
     except Exception as e:
-        logger.error("Error in population choropleth: %s", str(e), exc_info=True)
+        logger.error("Error in population choropleth: %s",
+                     str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @choropleth_router.get("/yll")
 async def get_choropleth_yll(
     year: int = Query(..., description="Year required for YLL data"),
-    sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$", description="Which YLL to return: total, fire, or nonfire"),
-    age_group: Optional[str] = Query(None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
+    sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$",
+                            description="Which YLL to return: total, fire, or nonfire"),
+    age_group: Optional[str] = Query(
+        None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
     db: Session = Depends(get_db)
 ):
     """Get YLL impact choropleth data (precomputed summary, total/fire/nonfire), optionally by age group(s)."""
@@ -767,7 +802,8 @@ async def get_choropleth_yll(
     try:
         age_group_list = None
         if age_group is not None and age_group.strip() != '':
-            age_group_list = [int(x) for x in age_group.split(',') if x.strip().isdigit()]
+            age_group_list = [int(x) for x in age_group.split(
+                ',') if x.strip().isdigit()]
         if age_group_list:
             # Get all relevant rows for selected age groups
             rows = db.query(
@@ -872,6 +908,7 @@ async def get_choropleth_yll(
 # Register the router
 app.include_router(choropleth_router)
 
+
 @app.get("/api/counties/decomp/{fips}")
 def get_county_decomposition_info(
     fips: str,
@@ -890,7 +927,8 @@ def get_county_decomposition_info(
         .order_by(DecompositionSummary.end_year.desc())\
         .first()
     if not decomp:
-        raise HTTPException(status_code=404, detail="Decomposition summary not found for this county")
+        raise HTTPException(
+            status_code=404, detail="Decomposition summary not found for this county")
 
     return {
         "fips": county.fips,
@@ -906,10 +944,12 @@ def get_county_decomposition_info(
         }
     }
 
+
 @app.get("/api/pm25/bar_chart/{fips}")
 async def get_bar_chart_data(
     fips: str,
-    time_scale: str = Query("yearly", pattern="^(yearly|monthly|seasonal|daily)$"),
+    time_scale: str = Query(
+        "yearly", pattern="^(yearly|monthly|seasonal|daily)$"),
     start_year: Optional[int] = Query(None),
     end_year: Optional[int] = Query(None),
     year: Optional[int] = Query(None),
@@ -920,7 +960,7 @@ async def get_bar_chart_data(
     """
     Get preprocessed bar chart data for a specific county.
     Uses summary tables when possible for better performance.
-    
+
     Returns a list of data points with the following structure:
     [
       {
@@ -939,11 +979,13 @@ async def get_bar_chart_data(
         # Validate county exists
         county = db.query(County).filter(County.fips == fips).first()
         if not county:
-            raise HTTPException(status_code=404, detail=f"County with FIPS {fips} not found")
-        
+            raise HTTPException(
+                status_code=404, detail=f"County with FIPS {fips} not found")
+
         if time_scale == "yearly":
-            query = db.query(YearlyPM25Summary).filter(YearlyPM25Summary.fips == fips)
-            
+            query = db.query(YearlyPM25Summary).filter(
+                YearlyPM25Summary.fips == fips)
+
             if start_year and end_year:
                 query = query.filter(
                     YearlyPM25Summary.year >= start_year,
@@ -951,9 +993,9 @@ async def get_bar_chart_data(
                 )
             elif year:
                 query = query.filter(YearlyPM25Summary.year == year)
-            
+
             results = query.order_by(YearlyPM25Summary.year).all()
-            
+
             data = [
                 {
                     "year": r.year,
@@ -966,16 +1008,17 @@ async def get_bar_chart_data(
                 }
                 for r in results
             ]
-            
+
         elif time_scale == "monthly":
             if not year:
-                raise HTTPException(status_code=400, detail="Year required for monthly data")
-            
+                raise HTTPException(
+                    status_code=400, detail="Year required for monthly data")
+
             results = db.query(MonthlyPM25Summary).filter(
                 MonthlyPM25Summary.fips == fips,
                 MonthlyPM25Summary.year == year
             ).order_by(MonthlyPM25Summary.month).all()
-            
+
             data = [
                 {
                     "year": r.year,
@@ -989,10 +1032,11 @@ async def get_bar_chart_data(
                 }
                 for r in results
             ]
-            
+
         elif time_scale == "seasonal":
-            query = db.query(SeasonalPM25Summary).filter(SeasonalPM25Summary.fips == fips)
-            
+            query = db.query(SeasonalPM25Summary).filter(
+                SeasonalPM25Summary.fips == fips)
+
             if start_year and end_year:
                 query = query.filter(
                     SeasonalPM25Summary.year >= start_year,
@@ -1000,9 +1044,10 @@ async def get_bar_chart_data(
                 )
             elif year:
                 query = query.filter(SeasonalPM25Summary.year == year)
-            
-            results = query.order_by(SeasonalPM25Summary.year, SeasonalPM25Summary.season).all()
-            
+
+            results = query.order_by(
+                SeasonalPM25Summary.year, SeasonalPM25Summary.season).all()
+
             data = [
                 {
                     "year": r.year,
@@ -1016,12 +1061,13 @@ async def get_bar_chart_data(
                 }
                 for r in results
             ]
-            
+
         elif time_scale == "daily":
             # For daily data, use the original DailyPM25 table
             if not year:
-                raise HTTPException(status_code=400, detail="Year required for daily data")
-            
+                raise HTTPException(
+                    status_code=400, detail="Year required for daily data")
+
             # Helper function to get season from month
             def get_season_from_month(month_num):
                 if month_num in [12, 1, 2]:
@@ -1032,13 +1078,14 @@ async def get_bar_chart_data(
                     return 'summer'
                 else:  # 9, 10, 11
                     return 'fall'
-            
+
             # Build the date range based on month or season
             if month:
                 # Get daily data for specific month
                 if month < 1 or month > 12:
-                    raise HTTPException(status_code=400, detail="Month must be between 1 and 12")
-                
+                    raise HTTPException(
+                        status_code=400, detail="Month must be between 1 and 12")
+
                 # Calculate last day of month
                 if month == 12:
                     next_month = 1
@@ -1046,16 +1093,18 @@ async def get_bar_chart_data(
                 else:
                     next_month = month + 1
                     next_year = year
-                
+
                 start_date = date(year, month, 1)
-                end_date = date(next_year, next_month, 1)  # First day of next month
-                
+                # First day of next month
+                end_date = date(next_year, next_month, 1)
+
             elif season:
                 # Get daily data for specific season
                 season = season.lower()
                 if season not in ['winter', 'spring', 'summer', 'fall']:
-                    raise HTTPException(status_code=400, detail="Season must be winter, spring, summer, or fall")
-                
+                    raise HTTPException(
+                        status_code=400, detail="Season must be winter, spring, summer, or fall")
+
                 if season == 'winter':
                     # Winter: Dec 21 - Mar 20
                     start_date = date(year - 1, 12, 21)
@@ -1076,13 +1125,13 @@ async def get_bar_chart_data(
                 # Get all daily data for the year
                 start_date = date(year, 1, 1)
                 end_date = date(year + 1, 1, 1)  # First day of next year
-            
+
             results = db.query(DailyPM25).filter(
                 DailyPM25.fips == fips,
                 DailyPM25.date >= start_date,
                 DailyPM25.date < end_date
             ).order_by(DailyPM25.date).all()
-            
+
             data = [
                 {
                     "date": r.date.isoformat(),
@@ -1095,12 +1144,13 @@ async def get_bar_chart_data(
                 }
                 for r in results
             ]
-        
+
         return data
-        
+
     except Exception as e:
         logger.error("Error in bar chart data: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/counties/statistics")
 async def get_county_statistics(
@@ -1114,29 +1164,35 @@ async def get_county_statistics(
     try:
         if time_scale == "yearly":
             if not year:
-                raise HTTPException(status_code=400, detail="Year required for yearly statistics")
-            
+                raise HTTPException(
+                    status_code=400, detail="Year required for yearly statistics")
+
             stats = db.query(
                 func.avg(YearlyPM25Summary.avg_total).label("mean_total"),
                 func.avg(YearlyPM25Summary.avg_fire).label("mean_fire"),
                 func.avg(YearlyPM25Summary.avg_nonfire).label("mean_nonfire"),
-                func.percentile_cont(0.5).within_group(YearlyPM25Summary.avg_total).label("median_total"),
-                func.percentile_cont(0.5).within_group(YearlyPM25Summary.avg_fire).label("median_fire"),
+                func.percentile_cont(0.5).within_group(
+                    YearlyPM25Summary.avg_total).label("median_total"),
+                func.percentile_cont(0.5).within_group(
+                    YearlyPM25Summary.avg_fire).label("median_fire"),
                 func.min(YearlyPM25Summary.avg_total).label("min_total"),
                 func.max(YearlyPM25Summary.avg_total).label("max_total"),
                 func.count().label("county_count")
             ).filter(YearlyPM25Summary.year == year).first()
-            
+
         elif time_scale == "monthly":
             if not year or not month:
-                raise HTTPException(status_code=400, detail="Year and month required for monthly statistics")
-            
+                raise HTTPException(
+                    status_code=400, detail="Year and month required for monthly statistics")
+
             stats = db.query(
                 func.avg(MonthlyPM25Summary.avg_total).label("mean_total"),
                 func.avg(MonthlyPM25Summary.avg_fire).label("mean_fire"),
                 func.avg(MonthlyPM25Summary.avg_nonfire).label("mean_nonfire"),
-                func.percentile_cont(0.5).within_group(MonthlyPM25Summary.avg_total).label("median_total"),
-                func.percentile_cont(0.5).within_group(MonthlyPM25Summary.avg_fire).label("median_fire"),
+                func.percentile_cont(0.5).within_group(
+                    MonthlyPM25Summary.avg_total).label("median_total"),
+                func.percentile_cont(0.5).within_group(
+                    MonthlyPM25Summary.avg_fire).label("median_fire"),
                 func.min(MonthlyPM25Summary.avg_total).label("min_total"),
                 func.max(MonthlyPM25Summary.avg_total).label("max_total"),
                 func.count().label("county_count")
@@ -1144,17 +1200,21 @@ async def get_county_statistics(
                 MonthlyPM25Summary.year == year,
                 MonthlyPM25Summary.month == month
             ).first()
-            
+
         elif time_scale == "seasonal":
             if not year or not season:
-                raise HTTPException(status_code=400, detail="Year and season required for seasonal statistics")
-            
+                raise HTTPException(
+                    status_code=400, detail="Year and season required for seasonal statistics")
+
             stats = db.query(
                 func.avg(SeasonalPM25Summary.avg_total).label("mean_total"),
                 func.avg(SeasonalPM25Summary.avg_fire).label("mean_fire"),
-                func.avg(SeasonalPM25Summary.avg_nonfire).label("mean_nonfire"),
-                func.percentile_cont(0.5).within_group(SeasonalPM25Summary.avg_total).label("median_total"),
-                func.percentile_cont(0.5).within_group(SeasonalPM25Summary.avg_fire).label("median_fire"),
+                func.avg(SeasonalPM25Summary.avg_nonfire).label(
+                    "mean_nonfire"),
+                func.percentile_cont(0.5).within_group(
+                    SeasonalPM25Summary.avg_total).label("median_total"),
+                func.percentile_cont(0.5).within_group(
+                    SeasonalPM25Summary.avg_fire).label("median_fire"),
                 func.min(SeasonalPM25Summary.avg_total).label("min_total"),
                 func.max(SeasonalPM25Summary.avg_total).label("max_total"),
                 func.count().label("county_count")
@@ -1162,7 +1222,7 @@ async def get_county_statistics(
                 SeasonalPM25Summary.year == year,
                 SeasonalPM25Summary.season == season.lower()
             ).first()
-        
+
         return {
             "time_scale": time_scale,
             "year": year,
@@ -1179,17 +1239,21 @@ async def get_county_statistics(
                 "county_count": int(stats.county_count) if stats.county_count else 0
             }
         }
-        
+
     except Exception as e:
         logger.error("Error in statistics: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/excess_mortality")
 def get_excess_mortality_summary(
     year: int = Query(None, description="Year to filter (optional)"),
-    fips: str = Query(None, description="County FIPS code to filter (optional)"),
-    sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$", description="Which excess mortality to return: total, fire, or nonfire"),
-    age_group: Optional[str] = Query(None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
+    fips: str = Query(
+        None, description="County FIPS code to filter (optional)"),
+    sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$",
+                            description="Which excess mortality to return: total, fire, or nonfire"),
+    age_group: Optional[str] = Query(
+        None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
     db: Session = Depends(get_db)
 ):
     """
@@ -1198,20 +1262,25 @@ def get_excess_mortality_summary(
     try:
         age_group_list = None
         if age_group is not None and age_group.strip() != '':
-            age_group_list = [int(x) for x in age_group.split(',') if x.strip().isdigit()]
+            age_group_list = [int(x) for x in age_group.split(
+                ',') if x.strip().isdigit()]
         # If fips is provided, group by year and sum over age groups
         if fips:
             query = db.query(
                 ExcessMortalitySummary.year,
-                func.sum(ExcessMortalitySummary.total_excess).label("total_excess"),
-                func.sum(ExcessMortalitySummary.fire_excess).label("fire_excess"),
-                func.sum(ExcessMortalitySummary.nonfire_excess).label("nonfire_excess"),
+                func.sum(ExcessMortalitySummary.total_excess).label(
+                    "total_excess"),
+                func.sum(ExcessMortalitySummary.fire_excess).label(
+                    "fire_excess"),
+                func.sum(ExcessMortalitySummary.nonfire_excess).label(
+                    "nonfire_excess"),
                 func.sum(ExcessMortalitySummary.population).label("population")
             ).filter(ExcessMortalitySummary.fips == fips)
             if year:
                 query = query.filter(ExcessMortalitySummary.year == year)
             if age_group_list:
-                query = query.filter(ExcessMortalitySummary.age_group.in_(age_group_list))
+                query = query.filter(
+                    ExcessMortalitySummary.age_group.in_(age_group_list))
             query = query.group_by(ExcessMortalitySummary.year)
             results = []
             for row in query.all():
@@ -1233,13 +1302,15 @@ def get_excess_mortality_summary(
                 })
             return results
         # Otherwise, return all age groups for the county-year (default behavior)
-        query = db.query(ExcessMortalitySummary, County.name).join(County, County.fips == ExcessMortalitySummary.fips)
+        query = db.query(ExcessMortalitySummary, County.name).join(
+            County, County.fips == ExcessMortalitySummary.fips)
         if year:
             query = query.filter(ExcessMortalitySummary.year == year)
         if fips:
             query = query.filter(ExcessMortalitySummary.fips == fips)
         if age_group_list:
-            query = query.filter(ExcessMortalitySummary.age_group == age_group_list)
+            query = query.filter(
+                ExcessMortalitySummary.age_group == age_group_list)
         results = []
         for row, county_name in query.all():
             if sub_metric == "total":
@@ -1263,8 +1334,10 @@ def get_excess_mortality_summary(
             })
         return results
     except Exception as e:
-        logger.error("Error in excess mortality summary endpoint: %s", str(e), exc_info=True)
+        logger.error(
+            "Error in excess mortality summary endpoint: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/counties/exceedance")
 def get_exceedance_summary(db: Session = Depends(get_db)):
@@ -1310,13 +1383,15 @@ def get_exceedance_summary(db: Session = Depends(get_db)):
             }
         }
     except Exception as e:
-        logger.error("Error in exceedance summary endpoint: %s", str(e), exc_info=True)
+        logger.error("Error in exceedance summary endpoint: %s",
+                     str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Health check endpoint
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
+
 
 @app.get("/")
 async def read_root():
@@ -1325,16 +1400,16 @@ async def read_root():
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     # Configure Uvicorn logging
     log_config = uvicorn.config.LOGGING_CONFIG
     log_config["loggers"]["uvicorn.error"]["level"] = "WARNING"
     log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"
     log_config["loggers"]["uvicorn"]["level"] = "WARNING"
-    
+
     # Disable watchfiles logging
     logging.getLogger("watchfiles").setLevel(logging.WARNING)
-    
+
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
