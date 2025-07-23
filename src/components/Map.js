@@ -254,7 +254,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     };
     fetchChoroplethData();
     return () => { isMounted = false; };
-  }, [mapRefreshKey, activeLayer, timeScale, year, month, season, pm25SubLayer, selectedAgeGroups]);
+  }, [mapRefreshKey, activeLayer, timeScale, year, month, season, pm25SubLayer, selectedAgeGroups, subMetric]);
 
   // Proper cleanup when switching to health layers or timeScale changes
   useEffect(() => {
@@ -454,9 +454,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
 
       // Add parameters based on the time scale
       if (currentTimeScale === 'yearly') {
-        // For yearly data, show 2013-2023 by default
+        // For yearly data, show 2006-2023 by default
         params.append('time_scale', 'yearly');
-        params.append('start_year', '2013');
+        params.append('start_year', '2006');
         params.append('end_year', '2023');
       } else if (currentTimeScale === 'monthly') {
         // For monthly data, we want daily data for the specific month
@@ -612,9 +612,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
       const response = await fetch(`http://localhost:8000/api/excess_mortality?fips=${fips}`);
       if (!response.ok) return [];
       const data = await response.json();
-      // Only keep years 2013-2023, sort by year
+      // Only keep years 2006-2023, sort by year
       return data
-        .filter(d => d.year >= 2013 && d.year <= 2023)
+        .filter(d => d.year >= 2006 && d.year <= 2023)
         .sort((a, b) => a.year - b.year)
         .map(d => ({
           year: d.year,
@@ -947,7 +947,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
               formattedValue = `${value}`;
             } else if (activeLayer === 'population') {
               formattedValue = value !== undefined ? value.toLocaleString() : 'N/A';
-            } else if (activeLayer === 'mortality' || activeLayer === 'yll') {
+            } else if (activeLayer === 'mortality') {
+              formattedValue = (typeof value === 'number') ? value.toFixed(3) + '%' : 'N/A';
+            } else if (activeLayer === 'yll') {
               formattedValue = (typeof value === 'number') ? (value * 100).toFixed(3) + '%' : 'N/A';
             } else if (typeof value === 'number' && Math.abs(value) >= 1000) {
               formattedValue = value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });

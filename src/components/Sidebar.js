@@ -46,7 +46,9 @@ const Sidebar = ({
     loading,
     onClearSelectedCounty,
     selectedAgeGroups,
-    setSelectedAgeGroups
+    setSelectedAgeGroups,
+    mortalitySubMetric,
+    setMortalitySubMetric
 }) => {
     const handleChange = (event) => {
         let value = event.target.value;
@@ -108,6 +110,8 @@ const Sidebar = ({
                     timeControls={timeControls}
                     setTimeControls={setTimeControls}
                     showTimeControls={false}
+                    mortalitySubMetric={mortalitySubMetric}
+                    setMortalitySubMetric={setMortalitySubMetric}
                 />
                 {/* Age group dropdown for mortality and YLL layers, below sub-metric pill, above time controls */}
                 {!(EXCEEDANCE_LAYERS.includes(activeLayer)) && (activeLayer === 'mortality' || activeLayer === 'yll') && (

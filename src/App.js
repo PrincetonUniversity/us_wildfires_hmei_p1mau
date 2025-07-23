@@ -43,12 +43,19 @@ function App() {
   const mapboxToken = process.env.REACT_APP_MAPBOX_TOKEN;
   const [selectedAgeGroups, setSelectedAgeGroups] = useState(AGE_GROUPS.map(g => g.value)); // default to all
   const [openLanding, setOpenLanding] = useState(true); // modal opens on first load
+  const [mortalitySubMetric, setMortalitySubMetric] = useState('total'); // 'total', 'fire', 'nonfire'
 
   useEffect(() => {
     if (!mapboxToken || mapboxToken === 'YOUR_MAPBOX_ACCESS_TOKEN') {
       setError('Mapbox token is missing or invalid. Please set REACT_APP_MAPBOX_TOKEN in your .env file.');
     }
   }, [mapboxToken]);
+
+  useEffect(() => {
+    if (activeLayer === 'mortality') {
+      setMortalitySubMetric('total');
+    }
+  }, [activeLayer]);
 
   // Handler for layer selection
   const handleSetActiveLayer = (layer) => {
@@ -91,6 +98,9 @@ function App() {
     } else if (county) {
       setSelectedCounty(county); // fallback, should always have lastHoveredCounty
     }
+  };
+  const handleSetMortalitySubMetric = (subMetric) => {
+    setMortalitySubMetric(subMetric);
   };
 
   // Fetch bar chart data for selected county
@@ -210,7 +220,7 @@ function App() {
             stateAbbr="CA"
             activeLayer={activeLayer}
             pm25SubLayer={pm25SubLayer}
-            timeControls={timeControls}
+            timeControls={{ ...timeControls, subMetric: mortalitySubMetric }}
             onCountySelect={handleCountySelect}
             onCountyHover={handleCountyHover}
             mapRefreshKey={mapRefreshKey}
@@ -228,10 +238,13 @@ function App() {
           timeControls={timeControls}
           setTimeControls={handleTimeControlsChange}
           selectedCounty={selectedCounty ? selectedCounty : hoveredCounty}
+          hoveredCounty={hoveredCounty}
           loading={loading}
           onClearSelectedCounty={handleClearSelectedCounty}
           selectedAgeGroups={selectedAgeGroups}
           setSelectedAgeGroups={setSelectedAgeGroups}
+          mortalitySubMetric={mortalitySubMetric}
+          setMortalitySubMetric={setMortalitySubMetric}
         />
       </Box>
     </>

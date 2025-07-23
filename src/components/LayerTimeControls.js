@@ -29,14 +29,16 @@ const LayerTimeControls = ({
     setPm25SubLayer,
     timeControls,
     setTimeControls,
-    showTimeControls
+    showTimeControls,
+    mortalitySubMetric,
+    setMortalitySubMetric
 }) => {
     // PM2.5 main options
     // { value: 'pop_weighted', label: 'Pop-weighted' },
     const pm25Options = [
         { value: 'average', label: 'Average' },
         { value: 'max', label: 'Max' },
-        
+
     ];
     // PM2.5 sub-options
     const pm25SubOptions = [
@@ -52,7 +54,7 @@ const LayerTimeControls = ({
     ];
 
     // Years for dropdown
-    const years = Array.from({ length: 11 }, (_, i) => 2013 + i);
+    const years = Array.from({ length: 18 }, (_, i) => 2006 + i);
     const months = [
         'January', 'February', 'March', 'April', 'May', 'June',
         'July', 'August', 'September', 'October', 'November', 'December'
@@ -249,6 +251,35 @@ const LayerTimeControls = ({
                             </Button>
                         ))}
                     </ButtonGroup>
+                    {/* Mortality sub-metric selector: show directly below the mortality pill, no heading */}
+                    {activeLayer === 'mortality' && (
+                        <Box sx={{ mt: 0.2, display: 'block' }}>
+                            <ButtonGroup variant="outlined" size="small" sx={{ display: 'inline-flex' }}>
+                                {mortalitySubOptions.map(opt => (
+                                    <Button
+                                        key={opt.value}
+                                        size="small"
+                                        sx={{
+                                            ...pillStyle,
+                                            bgcolor: mortalitySubMetric === opt.value ? 'secondary.main' : 'white',
+                                            color: mortalitySubMetric === opt.value ? 'white' : 'secondary.main',
+                                            borderColor: 'secondary.main',
+                                            px: 1,
+                                            py: 0.2,
+                                            m: 0.1,
+                                            '&:hover': {
+                                                bgcolor: mortalitySubMetric === opt.value ? 'secondary.dark' : 'secondary.light',
+                                                color: 'white'
+                                            }
+                                        }}
+                                        onClick={() => setMortalitySubMetric(opt.value)}
+                                    >
+                                        {opt.label}
+                                    </Button>
+                                ))}
+                            </ButtonGroup>
+                        </Box>
+                    )}
                 </Box>
                 {/* Regulatory Support / Exceedance Category Section */}
                 <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.4, fontSize: '0.98em' }}>
@@ -303,6 +334,8 @@ const LayerTimeControls = ({
                 timeControls={timeControls}
                 setTimeControls={setTimeControls}
                 showTimeControls={false}
+                mortalitySubMetric={mortalitySubMetric}
+                setMortalitySubMetric={setMortalitySubMetric}
             />
             {/* Time controls only */}
             <LayerTimeControls
