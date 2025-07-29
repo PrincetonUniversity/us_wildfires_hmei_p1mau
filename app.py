@@ -51,6 +51,8 @@ executor = ThreadPoolExecutor(max_workers=4)
 
 # Load county geometries once at startup
 COUNTY_GEOMETRIES = None
+
+
 def load_county_geometries():
     """Load county geometries from the shapefile and cache them."""
     global COUNTY_GEOMETRIES
@@ -90,6 +92,8 @@ def load_county_geometries():
     return COUNTY_GEOMETRIES
 
 # Application lifespan
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Initialize resources
@@ -139,6 +143,8 @@ def get_db():
         db.close()
 
 # Helper functions
+
+
 def get_season_date_range(year: int, season: str):
     season = season.lower()
     if season == "winter":
@@ -189,6 +195,8 @@ def get_season_from_date(date_obj: date) -> str:
         return "fall"
 
 # --- Helper Functions for Choropleth Endpoints ---
+
+
 def build_choropleth_query(db, time_scale, year, month, season, summary_model):
     if time_scale == "yearly":
         if not year:
@@ -320,6 +328,8 @@ choropleth_router = APIRouter(
     prefix="/api/counties/choropleth", tags=["Choropleth"])
 
 # Add a helper to sanitize float values for JSON
+
+
 def safe_float(val):
     if val is None or not math.isfinite(val):
         return 0.0
@@ -334,7 +344,7 @@ async def get_choropleth_mortality(
     age_group: Optional[str] = Query(
         None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
     db: Session = Depends(get_db)
-    ):
+):
     """Get mortality impact choropleth data (precomputed summary, total/fire/nonfire), optionally by age group(s)."""
     try:
         base_query = db.query(
@@ -485,7 +495,7 @@ async def get_choropleth_average(
     season: Optional[str] = Query(None),
     sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$"),
     db: Session = Depends(get_db)
-    ):
+):
     """Get average PM2.5 choropleth data."""
     summary_model = {
         "yearly": YearlyPM25Summary,
@@ -527,7 +537,7 @@ async def get_choropleth_max(
     season: Optional[str] = Query(None),
     sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$"),
     db: Session = Depends(get_db)
-    ):
+):
     """Get max PM2.5 choropleth data."""
     summary_model = {
         "yearly": YearlyPM25Summary,
@@ -569,7 +579,7 @@ async def get_choropleth_pop_weighted(
     season: Optional[str] = Query(None),
     sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$"),
     db: Session = Depends(get_db)
-    ):
+):
     """Get population-weighted PM2.5 choropleth data."""
     summary_model = {
         "yearly": YearlyPM25Summary,
@@ -608,7 +618,7 @@ async def get_choropleth_population(
     year: Optional[int] = Query(
         2020, description="Year for population data (optional, defaults to 2020)"),
     db: Session = Depends(get_db)
-    ):
+):
     """Get population choropleth data."""
     try:
         # Build query for population data
@@ -677,13 +687,14 @@ async def get_choropleth_yll(
     age_group: Optional[str] = Query(
         None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
     db: Session = Depends(get_db)
-    ):
+):
     """Get YLL impact choropleth data (precomputed summary, total/fire/nonfire), optionally by age group(s)."""
 
     try:
         age_group_list = None
         if age_group:
-            age_group_list = [int(x) for x in age_group.split(',') if x.strip().isdigit()]
+            age_group_list = [int(x) for x in age_group.split(
+                ',') if x.strip().isdigit()]
 
         # Base query
         query = db.query(
@@ -716,7 +727,8 @@ async def get_choropleth_yll(
             if not group_rows or not group_rows[0].geometry:
                 continue
 
-            total_yll = sum(getattr(row, f"yll_{sub_metric}", 0.0) or 0.0 for row in group_rows)
+            total_yll = sum(
+                getattr(row, f"yll_{sub_metric}", 0.0) or 0.0 for row in group_rows)
             total_pop = sum(row.population or 0 for row in group_rows)
 
             # Normalize YLL: total_yll / total_pop
@@ -762,11 +774,11 @@ def get_county_decomposition_info(
     fips: str,
     pm25_type: str = "total",
     db: Session = Depends(get_db)
-    ):
+):
     """
     Get decomposition summary and county info for a given county FIPS.
     Returns the latest available decomposition result.
-    
+
     Args:
         fips (str): County FIPS code
         pm25_type (str): Type of PM2.5 analysis - 'total' or 'fire' (default: 'total')
@@ -774,10 +786,10 @@ def get_county_decomposition_info(
     # Validate pm25_type parameter
     if pm25_type not in ["total", "fire"]:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail="pm25_type must be 'total' or 'fire'"
         )
-    
+
     county = db.query(County).filter(County.fips == fips).first()
     if not county:
         raise HTTPException(status_code=404, detail="County not found")
@@ -788,16 +800,16 @@ def get_county_decomposition_info(
     # Query using age_group code instead of None
     decomp = db.query(DecompositionSummary)\
         .filter(
-            DecompositionSummary.fips == fips, 
+            DecompositionSummary.fips == fips,
             DecompositionSummary.age_group == age_group_code
-        )\
+    )\
         .order_by(DecompositionSummary.end_year.desc())\
         .first()
-        
+
     if not decomp:
         pm25_desc = "total PM2.5" if pm25_type == "total" else "fire PM2.5"
         raise HTTPException(
-            status_code=404, 
+            status_code=404,
             detail=f"Decomposition summary not found for this county ({pm25_desc})"
         )
 
@@ -828,7 +840,7 @@ async def get_bar_chart_data(
     month: Optional[int] = Query(None),
     season: Optional[str] = Query(None),
     db: Session = Depends(get_db)
-    ):
+):
     """
     Get preprocessed bar chart data for a specific county.
     Uses summary tables when possible for better performance.
@@ -1031,7 +1043,7 @@ async def get_county_statistics(
     month: Optional[int] = Query(None),
     season: Optional[str] = Query(None),
     db: Session = Depends(get_db)
-    ):
+):
     """Get statistical summaries across all counties."""
     try:
         if time_scale == "yearly":
@@ -1127,7 +1139,7 @@ def get_excess_mortality_summary(
     age_group: Optional[str] = Query(
         None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
     db: Session = Depends(get_db)
-    ):
+):
     """
     Return precomputed excess mortality summary (total, fire, nonfire) for each county-year-age_group. If age_group is not provided, return all age groups for the county-year.
     """
@@ -1260,9 +1272,12 @@ def get_exceedance_summary(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Health check endpoint
+
+
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
+
 
 @app.get("/")
 async def read_root():

@@ -153,6 +153,8 @@ function App() {
     setSelectedCounty(null);
   };
 
+
+
   if (error) {
     return (
       <Container maxWidth="md" sx={{ mt: 4, textAlign: 'center' }}>
@@ -241,6 +243,7 @@ function App() {
           hoveredCounty={hoveredCounty}
           loading={loading}
           onClearSelectedCounty={handleClearSelectedCounty}
+
           selectedAgeGroups={selectedAgeGroups}
           setSelectedAgeGroups={setSelectedAgeGroups}
           mortalitySubMetric={mortalitySubMetric}

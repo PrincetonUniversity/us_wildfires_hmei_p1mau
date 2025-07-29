@@ -178,7 +178,10 @@ const Sidebar = ({
                     borderRadius: 8
                 }
             }}>
-                <CountyInfoPanel selectedCounty={hoveredCounty || selectedCounty} onClearSelectedCounty={onClearSelectedCounty} />
+                <CountyInfoPanel
+                    selectedCounty={hoveredCounty || selectedCounty}
+                    onClearSelectedCounty={onClearSelectedCounty}
+                />
             </Box>
         </Box>
     );

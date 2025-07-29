@@ -166,6 +166,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [choroplethData, setChoroplethData] = useState(null);
+  const [decompositionPM25Type, setDecompositionPM25Type] = useState("total");
   const currentCountyRef = useRef(null);
 
   // Destructure time controls
@@ -630,9 +631,9 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
   };
 
   // Function to fetch decomposition data for a specific county
-  const fetchDecompositionData = async (fips) => {
+  const fetchDecompositionData = async (fips, pm25Type = "total") => {
     try {
-      const response = await fetch(`http://localhost:8000/api/counties/decomp/${fips}`);
+      const response = await fetch(`http://localhost:8000/api/counties/decomp/${fips}?pm25_type=${pm25Type}`);
       if (!response.ok) return null;
       const data = await response.json();
       return data.decomposition;
@@ -889,7 +890,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
 
             // Fetch decomposition data only for mortality layer
             if (activeLayer === 'mortality') {
-              decompositionData = await fetchDecompositionData(countyId);
+              decompositionData = await fetchDecompositionData(countyId, decompositionPM25Type);
             }
           } catch (err) { }
           const countyName = props.county_name || props.NAME || 'Unknown County';
@@ -927,6 +928,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
             yll_nonfire: props.yll_nonfire,
             barChartData,
             decompositionData,
+            decompositionPM25Type,
             timeScale,
             year,
             month,
@@ -1016,7 +1018,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
 
           // Fetch decomposition data only for mortality layer
           if (activeLayer === 'mortality') {
-            decompositionData = await fetchDecompositionData(countyId);
+            decompositionData = await fetchDecompositionData(countyId, decompositionPM25Type);
           }
         } catch (err) {
           console.error('Error fetching bar chart data for selection:', err);
@@ -1047,6 +1049,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
           yll_nonfire: props.yll_nonfire,
           barChartData,
           decompositionData,
+          decompositionPM25Type,
           timeScale,
           year,
           month,
@@ -1091,7 +1094,19 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
       mapInstance.off('click', handleClick);
       if (popup.current) popup.current.remove();
     };
-  }, [choroplethData, activeLayer, timeScale, year, month, season]);
+  }, [choroplethData, activeLayer, timeScale, year, month, season, decompositionPM25Type]);
+
+  // Update decomposition PM2.5 type based on mortality submetric
+  useEffect(() => {
+    if (activeLayer === 'mortality') {
+      if (subMetric === 'fire') {
+        setDecompositionPM25Type('fire');
+      } else {
+        // For 'total' or 'nonfire', use total PM2.5 decomposition
+        setDecompositionPM25Type('total');
+      }
+    }
+  }, [activeLayer, subMetric]);
 
   // Highlight selected county outline
   useEffect(() => {

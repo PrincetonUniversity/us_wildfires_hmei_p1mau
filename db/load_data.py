@@ -1702,42 +1702,42 @@ def main():
     try:
         with DataLoader() as loader:
             # Step 1: Create tables
-            loader.create_tables()
+            # loader.create_tables()
 
             # Step 2: Load counties
-            loader.load_counties()
+            # loader.load_counties()
 
             # Step 3: Load population data (from API for 2009-2023)
-            loader.load_population_data()
-            loader.load_population_data_api()
+            # loader.load_population_data()
+            # loader.load_population_data_api()
 
             # Step 4: Load baseline mortality rates
-            loader.load_baseline_mortality()
+            # loader.load_baseline_mortality()
 
             # Step 5: Load PM2.5 data (this will take the longest)
-            loader.load_pm25_data()
+            # loader.load_pm25_data()
 
             # Step 6: Create indexes
-            loader.create_indexes()
+            # loader.create_indexes()
 
             # Step 7: Generate aggregations
-            loader.preprocess_aggregations()
+            # loader.preprocess_aggregations()
 
             # Step 8: Load fire attribution bins
-            loader.load_fire_attribution_bins()
+            # loader.load_fire_attribution_bins()
 
             # Step 9: Compute and store excess mortality summary
-            loader.excess_mortality_summary()
+            # loader.excess_mortality_summary()
             # loader.switch_default_method() # if need to change default method
 
             # Step 10: Load exceedance summary
-            loader.load_exceedance_summary()
+            #loader.load_exceedance_summary()
 
             # Step 11: Load decomposition summary
             loader.load_decomposition_summary()
 
             # Step 12: Validate data
-            loader.validate_data()
+            # loader.validate_data()
 
         logger.info("=== Data Loading Process Completed Successfully ===")
 

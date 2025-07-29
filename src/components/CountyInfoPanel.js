@@ -40,6 +40,7 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
         delta_mortality,
         barChartData,
         decompositionData,
+        decompositionPM25Type,
         timeScale,
         year,
         month,
@@ -212,11 +213,12 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
             {decompositionData && activeLayer === 'mortality' && (
                 <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
                     <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: '1em', mb: 0.5 }}>
-                        Decomposition Analysis (2013–2023)
+                        Decomposition Analysis (2013–2023) - {decompositionPM25Type === 'fire' ? 'Fire PM2.5' : 'Total PM2.5'}
                     </Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.8em', mb: 0.5 }}>
                         Factor contribution to change in excess mortality
                     </Typography>
+
                     <CountyDecompositionChart decompositionData={decompositionData} />
                 </Box>
             )}
