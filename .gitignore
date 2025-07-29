@@ -16,8 +16,8 @@ build
 # Database and data
 alembic.ini
 alembic/
-db/
 analysis/
+data/
 
 # Docker
 env.sh

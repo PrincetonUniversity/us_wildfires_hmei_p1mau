@@ -1,12 +1,17 @@
+# app.py - PM2.5 Wildfire Dashboard
+# By: Hassan Khan
+
+# Standard library imports
 import logging
 import warnings
-from contextlib import asynccontextmanager
-from datetime import datetime, date
-from typing import Optional
 import os
 import math
+from datetime import datetime, date
+from contextlib import asynccontextmanager
+from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
+# Third-party imports
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Depends, status, BackgroundTasks, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +23,7 @@ from sqlalchemy.orm import Session
 import geopandas as gpd
 from shapely.geometry import mapping
 
-# Application imports
+# Local application imports
 from db.database import SessionLocal
 from db.models import (
     DailyPM25, County, Population,
@@ -116,8 +121,6 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# Serve static files from the build directory
-# app.mount("/", StaticFiles(directory="build", html=True), name="static")
 
 # Database session dependency
 def get_db():
@@ -402,7 +405,7 @@ async def get_choropleth_mortality(
                 subq.c.nonfire_excess,
                 subq.c.population
             ).join(subq, subq.c.fips == County.fips).filter(~County.fips.startswith('72')).all()
-        
+
         def safe_float(value):
             """Convert value to float, handling None and NaN cases"""
             if value is None:
@@ -415,12 +418,12 @@ async def get_choropleth_mortality(
                 return result
             except (ValueError, TypeError):
                 return 0.0
-        
+
         features = []
         for row in results:
             if not row.geometry:
                 continue
-            
+
             # Get the excess value based on sub_metric, with safe conversion
             if sub_metric == "total":
                 excess = safe_float(row.total_excess)
@@ -430,9 +433,9 @@ async def get_choropleth_mortality(
                 excess = safe_float(row.nonfire_excess)
             else:
                 excess = safe_float(row.total_excess)
-            
+
             population = row.population or 0
-            
+
             # Safe calculation of the rate
             if population > 0 and excess is not None:
                 value = (excess / population) * 100
@@ -441,7 +444,7 @@ async def get_choropleth_mortality(
                     value = 0.0
             else:
                 value = 0.0
-            
+
             feature = {
                 "type": "Feature",
                 "geometry": row.geometry,
@@ -456,7 +459,7 @@ async def get_choropleth_mortality(
                 }
             }
             features.append(feature)
-        
+
         return {
             "type": "FeatureCollection",
             "features": features,
@@ -482,7 +485,7 @@ async def get_choropleth_average(
     season: Optional[str] = Query(None),
     sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$"),
     db: Session = Depends(get_db)
-):
+    ):
     """Get average PM2.5 choropleth data."""
     summary_model = {
         "yearly": YearlyPM25Summary,
@@ -524,7 +527,7 @@ async def get_choropleth_max(
     season: Optional[str] = Query(None),
     sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$"),
     db: Session = Depends(get_db)
-):
+    ):
     """Get max PM2.5 choropleth data."""
     summary_model = {
         "yearly": YearlyPM25Summary,
@@ -566,7 +569,7 @@ async def get_choropleth_pop_weighted(
     season: Optional[str] = Query(None),
     sub_metric: str = Query("total", pattern="^(total|fire|nonfire)$"),
     db: Session = Depends(get_db)
-):
+    ):
     """Get population-weighted PM2.5 choropleth data."""
     summary_model = {
         "yearly": YearlyPM25Summary,
@@ -605,7 +608,7 @@ async def get_choropleth_population(
     year: Optional[int] = Query(
         2020, description="Year for population data (optional, defaults to 2020)"),
     db: Session = Depends(get_db)
-):
+    ):
     """Get population choropleth data."""
     try:
         # Build query for population data
@@ -676,152 +679,64 @@ async def get_choropleth_yll(
     db: Session = Depends(get_db)
     ):
     """Get YLL impact choropleth data (precomputed summary, total/fire/nonfire), optionally by age group(s)."""
-    import math
-    
-    LE_LOOKUP = {
-        1: 75.8, 2: 71.0, 3: 66.0, 4: 61.1, 5: 56.4, 6: 51.7,
-        7: 47.1, 8: 42.5, 9: 38.0, 10: 33.6, 11: 29.2, 12: 25.1,
-        13: 21.2, 14: 17.5, 15: 14.0, 16: 10.7, 17: 7.9, 18: 3.9
-    }
-    
-    def safe_float(value):
-        """Convert value to float, handling None and NaN cases"""
-        if value is None:
-            return 0.0
-        try:
-            result = float(value)
-            # Check if result is NaN or infinite
-            if math.isnan(result) or math.isinf(result):
-                return 0.0
-            return result
-        except (ValueError, TypeError):
-            return 0.0
-    
+
     try:
         age_group_list = None
-        if age_group is not None and age_group.strip() != '':
-            age_group_list = [int(x) for x in age_group.split(
-                ',') if x.strip().isdigit()]
-        if age_group_list:
-            # Get all relevant rows for selected age groups
-            rows = db.query(
-                County.fips,
-                County.name.label("county_name"),
-                County.geometry,
-                ExcessMortalitySummary.age_group,
-                ExcessMortalitySummary.population,
-                ExcessMortalitySummary.total_excess,
-                ExcessMortalitySummary.fire_excess,
-                ExcessMortalitySummary.nonfire_excess
-            ).join(
-                ExcessMortalitySummary, and_(
-                    ExcessMortalitySummary.fips == County.fips,
-                    ExcessMortalitySummary.year == year,
-                    ExcessMortalitySummary.age_group.in_(age_group_list)
-                )
-            ).filter(~County.fips.startswith('72')).all()
-        else:
-            # Get all age groups for each county-year
-            rows = db.query(
-                County.fips,
-                County.name.label("county_name"),
-                County.geometry,
-                ExcessMortalitySummary.age_group,
-                ExcessMortalitySummary.population,
-                ExcessMortalitySummary.total_excess,
-                ExcessMortalitySummary.fire_excess,
-                ExcessMortalitySummary.nonfire_excess
-            ).join(
-                ExcessMortalitySummary, and_(
-                    ExcessMortalitySummary.fips == County.fips,
-                    ExcessMortalitySummary.year == year
-                )
-            ).filter(~County.fips.startswith('72')).all()
-        
-        # Group by county
+        if age_group:
+            age_group_list = [int(x) for x in age_group.split(',') if x.strip().isdigit()]
+
+        # Base query
+        query = db.query(
+            County.fips,
+            County.name.label("county_name"),
+            County.geometry,
+            ExcessMortalitySummary.age_group,
+            ExcessMortalitySummary.population,
+            ExcessMortalitySummary.yll_total,
+            ExcessMortalitySummary.yll_fire,
+            ExcessMortalitySummary.yll_nonfire
+        ).join(
+            ExcessMortalitySummary,
+            and_(
+                ExcessMortalitySummary.fips == County.fips,
+                ExcessMortalitySummary.year == year,
+                *(ExcessMortalitySummary.age_group.in_(age_group_list),) if age_group_list else ()
+            )
+        ).filter(~County.fips.startswith("72"))
+
+        rows = query.all()
+
         from collections import defaultdict
         county_data = defaultdict(list)
         for row in rows:
             county_data[row.fips].append(row)
-        
+
         features = []
         for fips, group_rows in county_data.items():
             if not group_rows or not group_rows[0].geometry:
                 continue
-            
-            numerator = 0.0
-            denominator = 0.0
-            yll_total = 0.0
-            yll_fire = 0.0
-            yll_nonfire = 0.0
-            
-            for row in group_rows:
-                ag = row.age_group
-                pop = safe_float(row.population)  # Use safe_float
-                le = LE_LOOKUP.get(ag, 0)
-                
-                # Use safe_float for all excess values
-                total_excess = safe_float(row.total_excess)
-                fire_excess = safe_float(row.fire_excess)
-                nonfire_excess = safe_float(row.nonfire_excess)
-                
-                # Calculate contributions safely
-                total_yll_contrib = total_excess * le
-                fire_yll_contrib = fire_excess * le
-                nonfire_yll_contrib = nonfire_excess * le
-                pop_le_contrib = pop * le
-                
-                # Check each calculation for NaN
-                if not math.isfinite(total_yll_contrib):
-                    total_yll_contrib = 0.0
-                if not math.isfinite(fire_yll_contrib):
-                    fire_yll_contrib = 0.0
-                if not math.isfinite(nonfire_yll_contrib):
-                    nonfire_yll_contrib = 0.0
-                if not math.isfinite(pop_le_contrib):
-                    pop_le_contrib = 0.0
-                
-                # Numerator: excess mortality * LE
-                if sub_metric == "total":
-                    numerator += total_yll_contrib
-                elif sub_metric == "fire":
-                    numerator += fire_yll_contrib
-                elif sub_metric == "nonfire":
-                    numerator += nonfire_yll_contrib
-                else:
-                    numerator += total_yll_contrib
-                
-                denominator += pop_le_contrib
-                yll_total += total_yll_contrib
-                yll_fire += fire_yll_contrib
-                yll_nonfire += nonfire_yll_contrib
-            
-            # Safe division for normalized YLL
-            if denominator > 0 and math.isfinite(denominator) and math.isfinite(numerator):
-                normalized_yll = numerator / denominator
-                # Double-check the result
-                if not math.isfinite(normalized_yll):
-                    normalized_yll = 0.0
-            else:
-                normalized_yll = 0.0
-            
-            total_pop = sum(safe_float(row.population) for row in group_rows)
-            
+
+            total_yll = sum(getattr(row, f"yll_{sub_metric}", 0.0) or 0.0 for row in group_rows)
+            total_pop = sum(row.population or 0 for row in group_rows)
+
+            # Normalize YLL: total_yll / total_pop
+            normalized_yll = total_yll / total_pop if total_pop else 0.0
+
             feature = {
                 "type": "Feature",
                 "geometry": group_rows[0].geometry,
                 "properties": {
                     "fips": fips,
                     "county_name": group_rows[0].county_name,
-                    "yll_total": safe_float(yll_total),
-                    "yll_fire": safe_float(yll_fire),
-                    "yll_nonfire": safe_float(yll_nonfire),
-                    "population": int(total_pop) if math.isfinite(total_pop) else 0,
-                    "value": safe_float(normalized_yll)
+                    "yll_total": sum(row.yll_total or 0.0 for row in group_rows),
+                    "yll_fire": sum(row.yll_fire or 0.0 for row in group_rows),
+                    "yll_nonfire": sum(row.yll_nonfire or 0.0 for row in group_rows),
+                    "population": int(total_pop),
+                    "value": normalized_yll
                 }
             }
             features.append(feature)
-        
+
         return {
             "type": "FeatureCollection",
             "features": features,
@@ -845,27 +760,51 @@ app.include_router(choropleth_router)
 @app.get("/api/counties/decomp/{fips}")
 def get_county_decomposition_info(
     fips: str,
+    pm25_type: str = "total",
     db: Session = Depends(get_db)
-):
+    ):
     """
     Get decomposition summary and county info for a given county FIPS.
     Returns the latest available decomposition result.
+    
+    Args:
+        fips (str): County FIPS code
+        pm25_type (str): Type of PM2.5 analysis - 'total' or 'fire' (default: 'total')
     """
+    # Validate pm25_type parameter
+    if pm25_type not in ["total", "fire"]:
+        raise HTTPException(
+            status_code=400, 
+            detail="pm25_type must be 'total' or 'fire'"
+        )
+    
     county = db.query(County).filter(County.fips == fips).first()
     if not county:
         raise HTTPException(status_code=404, detail="County not found")
 
+    # Map PM2.5 type to age_group code (using our workaround)
+    age_group_code = -1 if pm25_type == "total" else -2
+    
+    # Query using age_group code instead of None
     decomp = db.query(DecompositionSummary)\
-        .filter(DecompositionSummary.fips == fips, DecompositionSummary.age_group == None)\
+        .filter(
+            DecompositionSummary.fips == fips, 
+            DecompositionSummary.age_group == age_group_code
+        )\
         .order_by(DecompositionSummary.end_year.desc())\
         .first()
+        
     if not decomp:
+        pm25_desc = "total PM2.5" if pm25_type == "total" else "fire PM2.5"
         raise HTTPException(
-            status_code=404, detail="Decomposition summary not found for this county")
+            status_code=404, 
+            detail=f"Decomposition summary not found for this county ({pm25_desc})"
+        )
 
     return {
         "fips": county.fips,
         "county_name": county.name,
+        "pm25_type": pm25_type,
         "start_year": decomp.start_year,
         "end_year": decomp.end_year,
         "decomposition": {
@@ -889,7 +828,7 @@ async def get_bar_chart_data(
     month: Optional[int] = Query(None),
     season: Optional[str] = Query(None),
     db: Session = Depends(get_db)
-):
+    ):
     """
     Get preprocessed bar chart data for a specific county.
     Uses summary tables when possible for better performance.
@@ -1092,7 +1031,7 @@ async def get_county_statistics(
     month: Optional[int] = Query(None),
     season: Optional[str] = Query(None),
     db: Session = Depends(get_db)
-):
+    ):
     """Get statistical summaries across all counties."""
     try:
         if time_scale == "yearly":
@@ -1188,7 +1127,7 @@ def get_excess_mortality_summary(
     age_group: Optional[str] = Query(
         None, description="Comma-separated age group indices (e.g., '1,2,3') (optional, 1-18)"),
     db: Session = Depends(get_db)
-):
+    ):
     """
     Return precomputed excess mortality summary (total, fire, nonfire) for each county-year-age_group. If age_group is not provided, return all age groups for the county-year.
     """
@@ -1329,6 +1268,9 @@ async def health_check():
 async def read_root():
     """Serve the main HTML file"""
     return FileResponse("build/index.html")
+
+# Serve static files from the build directory (must be after all API routes)
+app.mount("/", StaticFiles(directory="build", html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
