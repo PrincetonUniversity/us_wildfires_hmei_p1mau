@@ -497,7 +497,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
         params.append('end_date', endDate.toISOString().split('T')[0]);
       }
 
-      console.log('Fetching bar chart data with params:', params.toString());
+      // console.log('Fetching bar chart data with params:', params.toString());
       const response = await fetch(`${endpoint}?${params}`);
       if (!response.ok) {
         const errorText = await response.text();
@@ -644,7 +644,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
 
   // Initialize map when component mounts
   useEffect(() => {
-    console.log('Map initialization useEffect triggered:', { activeLayer, pm25SubLayer, PM25_LAYERS: PM25_LAYERS.includes(activeLayer), HEALTH_LAYERS: HEALTH_LAYERS.includes(activeLayer), EXCEEDANCE_LAYERS: EXCEEDANCE_LAYERS.includes(activeLayer) });
+    // console.log('Map initialization useEffect triggered:', { activeLayer, pm25SubLayer, PM25_LAYERS: PM25_LAYERS.includes(activeLayer), HEALTH_LAYERS: HEALTH_LAYERS.includes(activeLayer), EXCEEDANCE_LAYERS: EXCEEDANCE_LAYERS.includes(activeLayer) });
 
     if (!mapboxToken) {
       setError('Mapbox token is missing');
@@ -655,7 +655,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     // For PM2.5 layers, require sub-layer selection
     if (PM25_LAYERS.includes(activeLayer) && !pm25SubLayer) return;
 
-    console.log('Initializing map for layer:', activeLayer);
+    // console.log('Initializing map for layer:', activeLayer);
     mapboxgl.accessToken = mapboxToken;
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
@@ -804,7 +804,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     if (!map.current || !choroplethData) return;
     if (!map.current.isStyleLoaded()) return;
 
-    console.log('Rendering map layer for:', activeLayer);
+    // console.log('Rendering map layer for:', activeLayer);
     const mapInstance = map.current;
     let metricForColor;
     if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
@@ -814,7 +814,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     } else {
       metricForColor = getMetricProperty();
     }
-    console.log('Using metric for color:', metricForColor);
+    // console.log('Using metric for color:', metricForColor);
 
     // Remove the layer if it exists
     if (mapInstance.getLayer('pm25-layer')) {

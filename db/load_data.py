@@ -281,9 +281,6 @@ class DataLoader:
                     population_data.append(pop_record)
                     total_pop_by_county_year[(fips, year)] += population
                     matched_count += 1
-                    if matched_count <= 5:
-                        logger.info(
-                            f"Match {matched_count}: fips={fips}, year={year}, age_group={age_group}, pop={population}")
                     if len(population_data) >= 1000:
                         self.db.bulk_save_objects(population_data)
                         self.db.commit()
@@ -387,8 +384,14 @@ class DataLoader:
         processed_count = 0
         matched_count = 0
         county_counter = 0
+
+        # Store 2021 data for Connecticut counties to use for 2022-2023
+        ct_2021_data = {}
+
         logger.info(
             "Loading population data from Census API (ACS 5-year, B01001)...")
+        logger.info(
+            "Note: Connecticut counties will use 2021 data for 2022-2023 due to planning region changes")
         try:
             for year in years:
                 logger.info(f"Loading population data for year {year}")
@@ -405,33 +408,81 @@ class DataLoader:
                                 logger.debug(
                                     f"Skipped county FIPS {fips} (not found in DB) for year {year}")
                                 continue
-                            county_counter += 1
-                            for group_index, var_list in ACS_AGE_VARIABLES.items():
-                                total = sum_age_group(row, var_list)
+
+                            # Special handling for Connecticut counties in 2022-2023
+                            if fips.startswith('09') and year in [2022, 2023]:
+                                # Use 2021 data for Connecticut counties in 2022-2023
+                                if fips not in ct_2021_data:
+                                    logger.warning(
+                                        f"No 2021 data found for Connecticut county {fips}, skipping 2022-2023")
+                                    continue
+                                year_data = ct_2021_data[fips]
+                                for group_index, var_list in ACS_AGE_VARIABLES.items():
+                                    total = year_data.get(group_index, 0)
+                                    try:
+                                        population_data.append(Population(
+                                            fips=fips,
+                                            year=year,
+                                            age_group=group_index,
+                                            population=total
+                                        ))
+                                        matched_count += 1
+                                    except Exception as e:
+                                        logger.warning(
+                                            f"Error creating Population record for {fips}, {year}, group {group_index}: {e}")
+                                # Add total population as age_group=0
                                 try:
+                                    total_pop = year_data.get(0, 0)
                                     population_data.append(Population(
                                         fips=fips,
                                         year=year,
-                                        age_group=group_index,
-                                        population=total
+                                        age_group=0,  # Special index for total population
+                                        population=total_pop
                                     ))
                                     matched_count += 1
                                 except Exception as e:
                                     logger.warning(
-                                        f"Error creating Population record for {fips}, {year}, group {group_index}: {e}")
-                            # Add total population as age_group=0
-                            try:
-                                total_pop = int(row.get('B01001_001E', 0))
-                                population_data.append(Population(
-                                    fips=fips,
-                                    year=year,
-                                    age_group=0,  # Special index for total population
-                                    population=total_pop
-                                ))
-                                matched_count += 1
-                            except Exception as e:
-                                logger.warning(
-                                    f"Error creating total Population record for {fips}, {year}: {e}")
+                                        f"Error creating total Population record for {fips}, {year}: {e}")
+                            else:
+                                # Normal processing for all other counties/years
+                                county_counter += 1
+
+                                # Store 2021 data for Connecticut counties
+                                if fips.startswith('09') and year == 2021:
+                                    ct_2021_data[fips] = {}
+                                    for group_index, var_list in ACS_AGE_VARIABLES.items():
+                                        total = sum_age_group(row, var_list)
+                                        ct_2021_data[fips][group_index] = total
+                                    # Store total population
+                                    total_pop = int(row.get('B01001_001E', 0))
+                                    ct_2021_data[fips][0] = total_pop
+
+                                for group_index, var_list in ACS_AGE_VARIABLES.items():
+                                    total = sum_age_group(row, var_list)
+                                    try:
+                                        population_data.append(Population(
+                                            fips=fips,
+                                            year=year,
+                                            age_group=group_index,
+                                            population=total
+                                        ))
+                                        matched_count += 1
+                                    except Exception as e:
+                                        logger.warning(
+                                            f"Error creating Population record for {fips}, {year}, group {group_index}: {e}")
+                                # Add total population as age_group=0
+                                try:
+                                    total_pop = int(row.get('B01001_001E', 0))
+                                    population_data.append(Population(
+                                        fips=fips,
+                                        year=year,
+                                        age_group=0,  # Special index for total population
+                                        population=total_pop
+                                    ))
+                                    matched_count += 1
+                                except Exception as e:
+                                    logger.warning(
+                                        f"Error creating total Population record for {fips}, {year}: {e}")
                             # Commit after every 100 counties
                             if county_counter % 100 == 0:
                                 self.db.bulk_save_objects(population_data)
@@ -1702,42 +1753,42 @@ def main():
     try:
         with DataLoader() as loader:
             # Step 1: Create tables
-            # loader.create_tables()
+            loader.create_tables()
 
             # Step 2: Load counties
-            # loader.load_counties()
+            loader.load_counties()
 
             # Step 3: Load population data (from API for 2009-2023)
-            # loader.load_population_data()
-            # loader.load_population_data_api()
+            loader.load_population_data()
+            loader.load_population_data_api()
 
             # Step 4: Load baseline mortality rates
-            # loader.load_baseline_mortality()
+            loader.load_baseline_mortality()
 
             # Step 5: Load PM2.5 data (this will take the longest)
-            # loader.load_pm25_data()
+            loader.load_pm25_data()
 
             # Step 6: Create indexes
-            # loader.create_indexes()
+            loader.create_indexes()
 
             # Step 7: Generate aggregations
-            # loader.preprocess_aggregations()
+            loader.preprocess_aggregations()
 
             # Step 8: Load fire attribution bins
-            # loader.load_fire_attribution_bins()
+            loader.load_fire_attribution_bins()
 
             # Step 9: Compute and store excess mortality summary
-            # loader.excess_mortality_summary()
+            loader.excess_mortality_summary()
             # loader.switch_default_method() # if need to change default method
 
             # Step 10: Load exceedance summary
-            #loader.load_exceedance_summary()
+            loader.load_exceedance_summary()
 
             # Step 11: Load decomposition summary
             loader.load_decomposition_summary()
 
             # Step 12: Validate data
-            # loader.validate_data()
+            loader.validate_data()
 
         logger.info("=== Data Loading Process Completed Successfully ===")
 

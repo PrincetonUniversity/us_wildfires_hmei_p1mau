@@ -181,23 +181,12 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
                             <> — <span style={{ color: '#1976d2' }}>{categoryMeanings[selectedCounty.threshold_9]}</span></>
                         )}
                     </Typography>
-                    <Box sx={{ mt: 0.5 }}>
-                        <Typography variant="caption" color="text.secondary">
-                            <strong>Category meanings:</strong><br />
-                            {categoryMeanings.map((meaning, idx) => (
-                                <span key={idx}>{idx}: {meaning}<br /></span>
-                            ))}
-                        </Typography>
-                    </Box>
                 </Box>
             )}
             {isBarChartDataForCurrentTimeScale() && (
                 <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
                     <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: '1em', mb: 0.5 }}>
                         {activeLayer === 'mortality' ? 'Excess Mortality Bar Chart' : activeLayer === 'yll' ? 'YLL Bar Chart' : 'PM2.5 Bar Chart'}
-                        <span style={{ fontWeight: 'normal', fontSize: '0.8em', color: '#888', marginLeft: 8 }}>
-                            [{barChartData[0]?.displayType}] {barChartData.length} pts
-                        </span>
                     </Typography>
                     {activeLayer === 'mortality' ? (
                         <CountyMortalityBarChart data={barChartData} timeScale="yearly" />
@@ -213,7 +202,7 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
             {decompositionData && activeLayer === 'mortality' && (
                 <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
                     <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: '1em', mb: 0.5 }}>
-                        Decomposition Analysis (2013–2023) - {decompositionPM25Type === 'fire' ? 'Fire PM2.5' : 'Total PM2.5'}
+                        Decomposition Analysis (2006–2023) - {decompositionPM25Type === 'fire' ? 'Fire PM2.5' : 'Total PM2.5'}
                     </Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.8em', mb: 0.5 }}>
                         Factor contribution to change in excess mortality
