@@ -15,8 +15,6 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Depends, status, BackgroundTasks, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, and_, extract
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -796,7 +794,7 @@ def get_county_decomposition_info(
 
     # Map PM2.5 type to age_group code (using our workaround)
     age_group_code = -1 if pm25_type == "total" else -2
-    
+
     # Query using age_group code instead of None
     decomp = db.query(DecompositionSummary)\
         .filter(
@@ -1278,14 +1276,6 @@ def get_exceedance_summary(db: Session = Depends(get_db)):
 async def health_check():
     return {"status": "ok"}
 
-
-@app.get("/")
-async def read_root():
-    """Serve the main HTML file"""
-    return FileResponse("build/index.html")
-
-# Serve static files from the build directory (must be after all API routes)
-app.mount("/", StaticFiles(directory="build", html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

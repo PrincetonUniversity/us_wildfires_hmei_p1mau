@@ -20,5 +20,4 @@ analysis/
 data/
 
 # Docker
-env.sh
 docker-compose.yaml
