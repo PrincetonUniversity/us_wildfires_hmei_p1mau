@@ -1448,11 +1448,13 @@ class DataLoader:
                 total_burden_start = (
                     pop_start_vec * y0_start_vec * AF_start_vec).sum()
 
-                pop_growth = A - total_burden_start
-                ageing = B - A
-                mortality = C - B
-                exposure = D - C
+                # calculate changes and contributions
                 total_change = D - total_burden_start
+                pop_growth = (A - total_burden_start) / total_change * 100 if total_change != 0 else 0
+                ageing = (B - A) / total_change * 100 if total_change != 0 else 0
+                mortality = (C - B) / total_change * 100 if total_change != 0 else 0
+                exposure = (D - C) / total_change * 100 if total_change != 0 else 0
+                total_change = total_change / total_burden_start * 100 if total_burden_start != 0 else 0
 
                 # Use the age_group field to store PM2.5 type without changing the model
                 # age_group = -1 for total PM2.5, age_group = -2 for fire PM2.5
@@ -1753,42 +1755,42 @@ def main():
     try:
         with DataLoader() as loader:
             # Step 1: Create tables
-            loader.create_tables()
+            # loader.create_tables()
 
             # Step 2: Load counties
-            loader.load_counties()
+            # loader.load_counties()
 
             # Step 3: Load population data (from API for 2009-2023)
-            loader.load_population_data()
-            loader.load_population_data_api()
+            # loader.load_population_data()
+            # loader.load_population_data_api()
 
             # Step 4: Load baseline mortality rates
-            loader.load_baseline_mortality()
+            # loader.load_baseline_mortality()
 
             # Step 5: Load PM2.5 data (this will take the longest)
-            loader.load_pm25_data()
+            # loader.load_pm25_data()
 
             # Step 6: Create indexes
-            loader.create_indexes()
+            # loader.create_indexes()
 
             # Step 7: Generate aggregations
-            loader.preprocess_aggregations()
+            # loader.preprocess_aggregations()
 
             # Step 8: Load fire attribution bins
-            loader.load_fire_attribution_bins()
+            # loader.load_fire_attribution_bins()
 
             # Step 9: Compute and store excess mortality summary
-            loader.excess_mortality_summary()
+            # loader.excess_mortality_summary()
             # loader.switch_default_method() # if need to change default method
 
             # Step 10: Load exceedance summary
-            loader.load_exceedance_summary()
+            # loader.load_exceedance_summary()
 
             # Step 11: Load decomposition summary
             loader.load_decomposition_summary()
 
             # Step 12: Validate data
-            loader.validate_data()
+            # loader.validate_data()
 
         logger.info("=== Data Loading Process Completed Successfully ===")
 

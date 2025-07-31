@@ -5,7 +5,8 @@ const COLORS = {
     population_growth: "#4e79a7",      // blue
     population_ageing: "#f28e2b",      // orange
     baseline_mortality_change: "#59a14f", // green
-    exposure_change: "#e15759"         // red
+    exposure_change: "#e15759",         // red
+    total_change: "#5f7d7aff" // gray
 };
 
 export default function CountyDecompositionChart({ decompositionData }) {
@@ -46,6 +47,11 @@ export default function CountyDecompositionChart({ decompositionData }) {
             factor: "Exposure Change",
             contribution: decompositionData.exposure_change,
             color: COLORS.exposure_change
+        },
+        {
+            factor: "Total Change",
+            contribution: decompositionData.total_change,
+            color: COLORS.total_change
         }
     ];
 
@@ -57,7 +63,8 @@ export default function CountyDecompositionChart({ decompositionData }) {
     // Add percentage values
     const dataWithPercentages = chartData.map(item => ({
         ...item,
-        percentage: totalChange !== 0 ? (item.contribution / totalChange) * 100 : 0
+        percentage: item.contribution
+        // percentage: totalChange !== 0 ? (item.contribution / totalChange) * 100 : 0
     }));
 
     // Custom tooltip
