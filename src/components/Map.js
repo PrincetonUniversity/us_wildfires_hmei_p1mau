@@ -4,6 +4,9 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { createRoot } from 'react-dom/client';
 import CountyBarChart from './CountyBarChart';
 
+// Get API base URL from environment
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '/api';
+
 // Color scale for PM2.5 values (yellow to orange to red)
 const PM25_COLORS_TOTAL = [
   [0, '#fff7bc'],    // light yellow
@@ -208,7 +211,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
           params.append('sub_metric', subMetric);
           if (metric === 'max') endpoint = '/api/counties/choropleth/max';
           if (metric === 'pop_weighted') endpoint = '/api/counties/choropleth/pop_weighted';
-          url = `http://localhost:8000${endpoint}?${params}`;
+          url = `${API_BASE_URL}${endpoint}?${params}`;
         } else if (HEALTH_LAYERS.includes(activeLayer)) {
           let params = new URLSearchParams();
           if (activeLayer === 'mortality') {
@@ -229,10 +232,10 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
             endpoint = '/api/counties/choropleth/population';
             params.append('year', year.toString());
           }
-          url = `http://localhost:8000${endpoint}?${params}`;
+          url = `${API_BASE_URL}${endpoint}?${params}`;
         } else if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
           endpoint = '/api/counties/exceedance';
-          url = `http://localhost:8000${endpoint}`;
+          url = `${API_BASE_URL}${endpoint}`;
         }
         const response = await fetch(url);
         if (!response.ok) {
@@ -449,7 +452,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
   const fetchBarChartData = async (fips, currentTimeScale = timeScale, currentYear = year, currentMonth = month, currentSeason = season) => {
     try {
       let params = new URLSearchParams();
-      let endpoint = `http://localhost:8000/api/pm25/bar_chart/${fips}`;
+      let endpoint = `${API_BASE_URL}/pm25/bar_chart/${fips}`;
 
       // console.log('Fetching bar chart data with time scale:', currentTimeScale);
 
@@ -610,7 +613,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
   // Function to fetch mortality bar chart data for a specific county
   const fetchMortalityBarChartData = async (fips) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/excess_mortality?fips=${fips}`);
+      const response = await fetch(`${API_BASE_URL}/excess_mortality?fips=${fips}`);
       if (!response.ok) return [];
       const data = await response.json();
       // Only keep years 2006-2023, sort by year
@@ -633,7 +636,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
   // Function to fetch decomposition data for a specific county
   const fetchDecompositionData = async (fips, pm25Type = "total") => {
     try {
-      const response = await fetch(`http://localhost:8000/api/counties/decomp/${fips}?pm25_type=${pm25Type}`);
+      const response = await fetch(`${API_BASE_URL}/counties/decomp/${fips}?pm25_type=${pm25Type}`);
       if (!response.ok) return null;
       const data = await response.json();
       return data.decomposition;
