@@ -106,10 +106,10 @@ select:focus {
 /* Material-UI header styles */
 .MuiBox-root[component="header"],
 .header-mui {
-    background: #1976d2 !important;
-    color: #fff !important;
+    background: #FFD48C !important;
+    color: #333 !important;
     padding: 18px 0 14px 0 !important;
-    box-shadow: 0 2px 8px rgba(25, 118, 210, 0.08);
+    box-shadow: 0 2px 8px rgba(255, 212, 140, 0.3);
     width: 100%;
     margin-bottom: 0;
     display: flex;
@@ -120,13 +120,46 @@ select:focus {
 
 .MuiTypography-h4,
 .MuiTypography-root[component="h1"] {
-    color: #fff !important;
-    font-size: 2.1em !important;
+    color: #333 !important;
+    font-size: 1.6rem !important;
     font-weight: 700 !important;
+    font-family: 'Roboto', sans-serif !important;
     letter-spacing: -1px;
     margin: 0 !important;
     margin-left: 1px;
     text-align: left;
+    padding: 8px 0 !important;
+}
+
+/* Navigation tabs styles */
+.MuiTabs-root {
+    margin-left: auto;
+}
+
+.MuiTab-root {
+    color: rgba(0, 0, 0, 0.7) !important;
+    font-weight: 500 !important;
+    font-size: 0.9rem !important;
+    font-family: 'Roboto', sans-serif !important;
+    text-transform: none !important;
+    min-width: auto !important;
+    padding: 6px 16px !important;
+}
+
+.MuiTab-root.Mui-selected {
+    color: #333 !important;
+    font-weight: 600 !important;
+}
+
+.MuiTab-root:hover {
+    color: #333 !important;
+    background-color: rgba(255, 255, 255, 0.6) !important;
+    border-radius: 4px !important;
+}
+
+.MuiTabs-indicator {
+    background-color: #333 !important;
+    height: 3px !important;
 }
 
 /* Ensure Container doesn't shrink the header */

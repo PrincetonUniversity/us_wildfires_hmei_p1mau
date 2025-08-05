@@ -15,8 +15,6 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Depends, status, BackgroundTasks, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, and_, extract
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -692,58 +690,77 @@ async def get_choropleth_yll(
 
     try:
         age_group_list = None
-        if age_group:
+        if age_group is not None and age_group.strip() != '':
             age_group_list = [int(x) for x in age_group.split(
                 ',') if x.strip().isdigit()]
 
-        # Base query
-        query = db.query(
+        if age_group_list:
+            # Sum over selected age groups for each county
+            subq = db.query(
+                ExcessMortalitySummary.fips,
+                func.sum(ExcessMortalitySummary.yll_total).label("yll_total"),
+                func.sum(ExcessMortalitySummary.yll_fire).label("yll_fire"),
+                func.sum(ExcessMortalitySummary.yll_nonfire).label(
+                    "yll_nonfire"),
+                func.sum(ExcessMortalitySummary.population).label("population")
+            ).filter(
+                ExcessMortalitySummary.year == year,
+                ExcessMortalitySummary.age_group.in_(age_group_list)
+            ).group_by(ExcessMortalitySummary.fips).subquery()
+        else:
+            # Sum over all age groups for each county-year
+            subq = db.query(
+                ExcessMortalitySummary.fips,
+                func.sum(ExcessMortalitySummary.yll_total).label("yll_total"),
+                func.sum(ExcessMortalitySummary.yll_fire).label("yll_fire"),
+                func.sum(ExcessMortalitySummary.yll_nonfire).label(
+                    "yll_nonfire"),
+                func.sum(ExcessMortalitySummary.population).label("population")
+            ).filter(
+                ExcessMortalitySummary.year == year
+            ).group_by(ExcessMortalitySummary.fips).subquery()
+
+        results = db.query(
             County.fips,
             County.name.label("county_name"),
             County.geometry,
-            ExcessMortalitySummary.age_group,
-            ExcessMortalitySummary.population,
-            ExcessMortalitySummary.yll_total,
-            ExcessMortalitySummary.yll_fire,
-            ExcessMortalitySummary.yll_nonfire
-        ).join(
-            ExcessMortalitySummary,
-            and_(
-                ExcessMortalitySummary.fips == County.fips,
-                ExcessMortalitySummary.year == year,
-                *(ExcessMortalitySummary.age_group.in_(age_group_list),) if age_group_list else ()
-            )
-        ).filter(~County.fips.startswith("72"))
-
-        rows = query.all()
-
-        from collections import defaultdict
-        county_data = defaultdict(list)
-        for row in rows:
-            county_data[row.fips].append(row)
+            subq.c.yll_total,
+            subq.c.yll_fire,
+            subq.c.yll_nonfire,
+            subq.c.population
+        ).join(subq, subq.c.fips == County.fips).filter(~County.fips.startswith('72')).all()
 
         features = []
-        for fips, group_rows in county_data.items():
-            if not group_rows or not group_rows[0].geometry:
+        for row in results:
+            if not row.geometry:
                 continue
 
-            total_yll = sum(
-                getattr(row, f"yll_{sub_metric}", 0.0) or 0.0 for row in group_rows)
-            total_pop = sum(row.population or 0 for row in group_rows)
+            # Get the YLL value based on sub_metric, with safe conversion
+            if sub_metric == "total":
+                yll_value = safe_float(row.yll_total)
+            elif sub_metric == "fire":
+                yll_value = safe_float(row.yll_fire)
+            elif sub_metric == "nonfire":
+                yll_value = safe_float(row.yll_nonfire)
+            else:
+                yll_value = 0.0
 
-            # Normalize YLL: total_yll / total_pop
-            normalized_yll = total_yll / total_pop if total_pop else 0.0
+            total_pop = safe_float(row.population)
+
+            # Normalize YLL: yll_value / total_pop
+            normalized_yll = safe_float(
+                yll_value / total_pop if total_pop > 0 else 0.0)
 
             feature = {
                 "type": "Feature",
-                "geometry": group_rows[0].geometry,
+                "geometry": row.geometry,
                 "properties": {
-                    "fips": fips,
-                    "county_name": group_rows[0].county_name,
-                    "yll_total": sum(row.yll_total or 0.0 for row in group_rows),
-                    "yll_fire": sum(row.yll_fire or 0.0 for row in group_rows),
-                    "yll_nonfire": sum(row.yll_nonfire or 0.0 for row in group_rows),
-                    "population": int(total_pop),
+                    "fips": row.fips,
+                    "county_name": row.county_name,
+                    "yll_total": safe_float(row.yll_total),
+                    "yll_fire": safe_float(row.yll_fire),
+                    "yll_nonfire": safe_float(row.yll_nonfire),
+                    "population": int(safe_float(total_pop)),
                     "value": normalized_yll
                 }
             }
@@ -796,7 +813,7 @@ def get_county_decomposition_info(
 
     # Map PM2.5 type to age_group code (using our workaround)
     age_group_code = -1 if pm25_type == "total" else -2
-    
+
     # Query using age_group code instead of None
     decomp = db.query(DecompositionSummary)\
         .filter(
@@ -1278,14 +1295,6 @@ def get_exceedance_summary(db: Session = Depends(get_db)):
 async def health_check():
     return {"status": "ok"}
 
-
-@app.get("/")
-async def read_root():
-    """Serve the main HTML file"""
-    return FileResponse("build/index.html")
-
-# Serve static files from the build directory (must be after all API routes)
-app.mount("/", StaticFiles(directory="build", html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

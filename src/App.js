@@ -3,6 +3,10 @@ import { Box, Container, CssBaseline, Typography, Button, Dialog, DialogTitle, D
 import Map from './components/Map';
 import Sidebar from './components/Sidebar';
 import CountyBarChart from './components/CountyBarChart';
+import Navigation from './components/Navigation';
+import About from './components/About';
+import Partners from './components/Partners';
+import Methodology from './components/Methodology';
 import './styles/style.css';
 
 const PM25_LAYERS = ['average', 'max', 'pop_weighted'];
@@ -44,6 +48,7 @@ function App() {
   const [selectedAgeGroups, setSelectedAgeGroups] = useState(AGE_GROUPS.map(g => g.value)); // default to all
   const [openLanding, setOpenLanding] = useState(true); // modal opens on first load
   const [mortalitySubMetric, setMortalitySubMetric] = useState('total'); // 'total', 'fire', 'nonfire'
+  const [activeTab, setActiveTab] = useState('map'); // 'map', 'about', 'partners', 'methodology'
 
   useEffect(() => {
     if (!mapboxToken || mapboxToken === 'YOUR_MAPBOX_ACCESS_TOKEN') {
@@ -153,6 +158,11 @@ function App() {
     setSelectedCounty(null);
   };
 
+  // Handler for tab changes
+  const handleTabChange = (newTab) => {
+    setActiveTab(newTab);
+  };
+
 
 
   if (error) {
@@ -206,50 +216,54 @@ function App() {
         </DialogActions>
       </Dialog>
       {/* Header */}
-      <Box component="header" sx={{ bgcolor: '#1976d2', color: 'white', py: 1, px: 1 }}>
+      <Box component="header" sx={{ bgcolor: '#FFD48C', color: 'black', py: 1, px: 2 }}>
         <Container maxWidth="xl">
-          <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold' }}>
-            PM2.5 Wildfire Impact Map
-          </Typography>
+          <Navigation activeTab={activeTab} onTabChange={handleTabChange} />
         </Container>
       </Box>
-      {/* Main content row */}
-      <Box sx={{ display: 'flex', flexDirection: 'row', height: 'calc(100vh - 64px)', width: '100vw', margin: 0, padding: 0, overflow: 'hidden' }}>
-        {/* Map Area */}
-        <Box sx={{ flex: 1, position: 'relative' }}>
-          <Map
-            mapboxToken={mapboxToken}
-            stateAbbr="CA"
+
+      {/* Main content based on active tab */}
+      {activeTab === 'map' && (
+        <Box sx={{ display: 'flex', flexDirection: 'row', height: 'calc(100vh - 64px)', width: '100vw', margin: 0, padding: 0, overflow: 'hidden' }}>
+          {/* Map Area */}
+          <Box sx={{ flex: 1, position: 'relative' }}>
+            <Map
+              mapboxToken={mapboxToken}
+              stateAbbr="CA"
+              activeLayer={activeLayer}
+              pm25SubLayer={pm25SubLayer}
+              timeControls={{ ...timeControls, subMetric: mortalitySubMetric }}
+              onCountySelect={handleCountySelect}
+              onCountyHover={handleCountyHover}
+              mapRefreshKey={mapRefreshKey}
+              onMapLoaded={handleMapLoaded}
+              selectedCounty={selectedCounty}
+              selectedAgeGroups={selectedAgeGroups}
+            />
+          </Box>
+          {/* Sidebar */}
+          <Sidebar
             activeLayer={activeLayer}
+            setActiveLayer={handleSetActiveLayer}
             pm25SubLayer={pm25SubLayer}
-            timeControls={{ ...timeControls, subMetric: mortalitySubMetric }}
-            onCountySelect={handleCountySelect}
-            onCountyHover={handleCountyHover}
-            mapRefreshKey={mapRefreshKey}
-            onMapLoaded={handleMapLoaded}
-            selectedCounty={selectedCounty}
+            setPm25SubLayer={handleSetPm25SubLayer}
+            timeControls={timeControls}
+            setTimeControls={handleTimeControlsChange}
+            selectedCounty={selectedCounty ? selectedCounty : hoveredCounty}
+            hoveredCounty={hoveredCounty}
+            loading={loading}
+            onClearSelectedCounty={handleClearSelectedCounty}
             selectedAgeGroups={selectedAgeGroups}
+            setSelectedAgeGroups={setSelectedAgeGroups}
+            mortalitySubMetric={mortalitySubMetric}
+            setMortalitySubMetric={setMortalitySubMetric}
           />
         </Box>
-        {/* Sidebar */}
-        <Sidebar
-          activeLayer={activeLayer}
-          setActiveLayer={handleSetActiveLayer}
-          pm25SubLayer={pm25SubLayer}
-          setPm25SubLayer={handleSetPm25SubLayer}
-          timeControls={timeControls}
-          setTimeControls={handleTimeControlsChange}
-          selectedCounty={selectedCounty ? selectedCounty : hoveredCounty}
-          hoveredCounty={hoveredCounty}
-          loading={loading}
-          onClearSelectedCounty={handleClearSelectedCounty}
+      )}
 
-          selectedAgeGroups={selectedAgeGroups}
-          setSelectedAgeGroups={setSelectedAgeGroups}
-          mortalitySubMetric={mortalitySubMetric}
-          setMortalitySubMetric={setMortalitySubMetric}
-        />
-      </Box>
+      {activeTab === 'about' && <About />}
+      {activeTab === 'partners' && <Partners />}
+      {activeTab === 'methodology' && <Methodology />}
     </>
   );
 }
