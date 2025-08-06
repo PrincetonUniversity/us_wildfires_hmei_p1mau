@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client';
 import CountyBarChart from './CountyBarChart';
 
 // Get API base URL from environment
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '/api';
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
 
 // Color scale for PM2.5 values (yellow to orange to red)
 const PM25_COLORS_TOTAL = [

@@ -10,8 +10,8 @@ BUILD_DIR="/usr/share/nginx/html"
 
 echo "=== Starting environment variable injection ==="
 echo "BUILD_DIR: $BUILD_DIR"
-echo "REACT_APP_MAPBOX_TOKEN: ${REACT_APP_MAPBOX_TOKEN:-'<not set>'}"
-echo "REACT_APP_API_BASE_URL: ${REACT_APP_API_BASE_URL:-'<not set>'}"
+echo "REACT_APP_MAPBOX_TOKEN: ${REACT_APP_MAPBOX_TOKEN:-''}"
+echo "REACT_APP_API_BASE_URL: ${REACT_APP_API_BASE_URL:-''}"
 echo "=== Listing all JS files in build directory ==="
 find "$BUILD_DIR" -name "*.js" -type f | head -10
 

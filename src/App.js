@@ -143,7 +143,7 @@ function App() {
       params.append('start_date', startDate.toISOString().split('T')[0]);
       params.append('end_date', endDate.toISOString().split('T')[0]);
     }
-    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || '/api'}${endpoint}?${params}`);
+    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || ''}${endpoint}?${params}`);
     if (!response.ok) return null;
     const data = await response.json();
     return data;

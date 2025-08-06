@@ -1,5 +1,5 @@
 // API utility functions
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '/api';
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '';
 
 export const apiCall = async (endpoint, params = {}) => {
   const url = new URL(endpoint, window.location.origin + API_BASE_URL);
