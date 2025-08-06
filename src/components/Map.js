@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { createRoot } from 'react-dom/client';
 import CountyBarChart from './CountyBarChart';
 
@@ -159,7 +159,7 @@ const categoryMeanings = [
   'Exceeding after excluding fire smoke on Tier 1,2,3 days'
 ];
 
-const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelect, onCountyHover, mapRefreshKey, onMapLoaded, selectedCounty, selectedAgeGroups }) => {
+const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelect, onCountyHover, mapRefreshKey, onMapLoaded, selectedCounty, selectedAgeGroups }) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const popup = useRef(null); // Persistent popup
@@ -240,6 +240,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
           throw new Error(`Failed to fetch choropleth data: ${response.status} ${response.statusText}\n${errorText}`);
         }
         const data = await response.json();
+
         if (isMounted) {
           setChoroplethData(data);
           setLoading(false);
@@ -256,6 +257,8 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     fetchChoroplethData();
     return () => { isMounted = false; };
   }, [mapRefreshKey, activeLayer, timeScale, year, month, season, pm25SubLayer, selectedAgeGroups, subMetric]);
+
+
 
   // Proper cleanup when switching to health layers or timeScale changes
   useEffect(() => {
@@ -646,32 +649,24 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
   useEffect(() => {
     // console.log('Map initialization useEffect triggered:', { activeLayer, pm25SubLayer, PM25_LAYERS: PM25_LAYERS.includes(activeLayer), HEALTH_LAYERS: HEALTH_LAYERS.includes(activeLayer), EXCEEDANCE_LAYERS: EXCEEDANCE_LAYERS.includes(activeLayer) });
 
-    if (!mapboxToken) {
-      setError('Mapbox token is missing');
-      return;
-    }
     if (!mapContainer.current) return;
-    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer) && !EXCEEDANCE_LAYERS.includes(activeLayer)) return;
-    // For PM2.5 layers, require sub-layer selection
-    if (PM25_LAYERS.includes(activeLayer) && !pm25SubLayer) return;
 
-    // console.log('Initializing map for layer:', activeLayer);
-    mapboxgl.accessToken = mapboxToken;
-    map.current = new mapboxgl.Map({
+    map.current = new maplibregl.Map({
       container: mapContainer.current,
-      style: 'mapbox://styles/mapbox/light-v10',
+      style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
       bounds: [-150.0, 24.0, -60.0, 50.0],
       padding: { top: 20, bottom: 20, left: 20, right: 20 }
     });
     map.current.dragRotate.disable();
     map.current.touchZoomRotate.disableRotation();
+
     // Create popup instance ONCE
-    popup.current = new mapboxgl.Popup({
+    popup.current = new maplibregl.Popup({
       closeButton: false,
       closeOnClick: false,
       maxWidth: 'none'
     });
-    // Cleanup
+    // Cleanup - remove the map on every re-render
     return () => {
       if (map.current) {
         if (map.current.loaded()) {
@@ -684,7 +679,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
         map.current = null;
       }
     };
-  }, [mapboxToken, activeLayer, pm25SubLayer]);
+  }, [activeLayer, pm25SubLayer]); // Reload map when layer changes
 
   // Helper function to get color scale based on metric
   const getColorScale = (data = null) => {
@@ -798,13 +793,15 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
 
   // Update map layers when choroplethData, activeMetric, or subMetric changes
   useEffect(() => {
-    console.log('Map layer rendering useEffect triggered:', { activeLayer, choroplethData: !!choroplethData, mapLoaded: map.current?.isStyleLoaded() });
+    if (!choroplethData || !map.current || !map.current.isStyleLoaded()) {
+      return;
+    }
 
-    if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer) && !EXCEEDANCE_LAYERS.includes(activeLayer)) return;
-    if (!map.current || !choroplethData) return;
-    if (!map.current.isStyleLoaded()) return;
+    // Remove existing layer if it exists
+    if (map.current.getLayer('pm25-layer')) {
+      map.current.removeLayer('pm25-layer');
+    }
 
-    // console.log('Rendering map layer for:', activeLayer);
     const mapInstance = map.current;
     let metricForColor;
     if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
@@ -814,24 +811,38 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     } else {
       metricForColor = getMetricProperty();
     }
+
+
+
+
     // console.log('Using metric for color:', metricForColor);
 
     // Remove the layer if it exists
     if (mapInstance.getLayer('pm25-layer')) {
       mapInstance.removeLayer('pm25-layer');
     }
-    // Add or update the source
+
+    // Filter out Alaska (FIPS starting with 02) and Puerto Rico (FIPS starting with 72)
+    const filteredData = {
+      ...choroplethData,
+      features: choroplethData.features.filter(feature => {
+        const fips = feature.properties.GEOID || feature.properties.FIPS || feature.properties.fips;
+        return fips && !fips.startsWith('02') && !fips.startsWith('72');
+      })
+    };
+
+    // Always update the source with filtered data
     if (!mapInstance.getSource('pm25')) {
       mapInstance.addSource('pm25', {
         type: 'geojson',
-        data: choroplethData,
+        data: filteredData,
         generateId: true
       });
     } else {
-      mapInstance.getSource('pm25').setData(choroplethData);
+      mapInstance.getSource('pm25').setData(filteredData);
     }
     // Add the layer
-    mapInstance.addLayer({
+    const layerConfig = {
       id: 'pm25-layer',
       type: 'fill',
       source: 'pm25',
@@ -845,7 +856,16 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
         'fill-opacity': 0.8,
         'fill-outline-color': 'rgba(0,0,0,0.2)'
       }
-    }, 'waterway-label');
+    };
+
+
+
+
+
+
+
+    // Add the layer
+    mapInstance.addLayer(layerConfig, 'boundary_county');
 
     // Update the legend
     updateLegend();
@@ -860,6 +880,11 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
 
     // Named handler to avoid stale closures and duplicate handlers
     const handleMouseMove = async (e) => {
+      // Disable hover functionality when a county is selected
+      if (selectedCounty) {
+        return;
+      }
+
       const features = mapInstance.queryRenderedFeatures(e.point, { layers: ['pm25-layer'] });
       if (features.length > 0) {
         const feature = features[0];
@@ -1071,18 +1096,34 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
     // Remove old handler, then add new one
     mapInstance.off('mousemove', handleMouseMove);
     mapInstance.on('mousemove', handleMouseMove);
+
+    // Update cursor style based on selection state
+    if (selectedCounty) {
+      mapInstance.getCanvas().style.cursor = 'default';
+    }
+
+    // Clear hover when mouse leaves the layer
     mapInstance.off('mouseleave', 'pm25-layer');
     mapInstance.on('mouseleave', 'pm25-layer', () => {
-      mapInstance.getCanvas().style.cursor = '';
-      if (popup.current) popup.current.remove();
-      currentCountyRef.current = null;
-      if (onCountyHover) onCountyHover(null);
+      // Only clear hover if no county is selected
+      if (!selectedCounty) {
+        mapInstance.getCanvas().style.cursor = '';
+        if (popup.current) popup.current.remove();
+        currentCountyRef.current = null;
+        if (onCountyHover) onCountyHover(null);
+      }
     });
+
+    // Clear hover when mouse leaves the map container entirely
     mapInstance.off('mouseleave');
     mapInstance.on('mouseleave', () => {
-      if (popup.current) popup.current.remove();
-      currentCountyRef.current = null;
-      if (onCountyHover) onCountyHover(null);
+      // Only clear hover if no county is selected
+      if (!selectedCounty) {
+        mapInstance.getCanvas().style.cursor = '';
+        if (popup.current) popup.current.remove();
+        currentCountyRef.current = null;
+        if (onCountyHover) onCountyHover(null);
+      }
     });
     mapInstance.off('click', handleClick);
     mapInstance.on('click', handleClick);
@@ -1094,7 +1135,7 @@ const Map = ({ mapboxToken, stateAbbr, activeLayer, pm25SubLayer, timeControls, 
       mapInstance.off('click', handleClick);
       if (popup.current) popup.current.remove();
     };
-  }, [choroplethData, activeLayer, timeScale, year, month, season, decompositionPM25Type]);
+  }, [choroplethData, activeLayer, timeScale, year, month, season, decompositionPM25Type, selectedCounty]);
 
   // Update decomposition PM2.5 type based on mortality submetric
   useEffect(() => {

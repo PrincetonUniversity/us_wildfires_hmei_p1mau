@@ -44,17 +44,13 @@ function App() {
   const [lastHoveredCounty, setLastHoveredCounty] = useState(null); // Store last full hover data
   const [loading, setLoading] = useState(false);
   const [mapRefreshKey, setMapRefreshKey] = useState(0); // triggers map data refresh
-  const mapboxToken = process.env.REACT_APP_MAPBOX_TOKEN;
+
   const [selectedAgeGroups, setSelectedAgeGroups] = useState(AGE_GROUPS.map(g => g.value)); // default to all
   const [openLanding, setOpenLanding] = useState(true); // modal opens on first load
   const [mortalitySubMetric, setMortalitySubMetric] = useState('total'); // 'total', 'fire', 'nonfire'
   const [activeTab, setActiveTab] = useState('map'); // 'map', 'about', 'partners', 'methodology'
 
-  useEffect(() => {
-    if (!mapboxToken || mapboxToken === 'YOUR_MAPBOX_ACCESS_TOKEN') {
-      setError('Mapbox token is missing or invalid. Please set REACT_APP_MAPBOX_TOKEN in your .env file.');
-    }
-  }, [mapboxToken]);
+
 
   useEffect(() => {
     if (activeLayer === 'mortality') {
@@ -216,7 +212,7 @@ function App() {
         </DialogActions>
       </Dialog>
       {/* Header */}
-      <Box component="header" sx={{ bgcolor: '#FFD48C', color: 'black', py: 1, px: 2 }}>
+      <Box component="header" className="app-header">
         <Container maxWidth="xl">
           <Navigation activeTab={activeTab} onTabChange={handleTabChange} />
         </Container>
@@ -228,7 +224,6 @@ function App() {
           {/* Map Area */}
           <Box sx={{ flex: 1, position: 'relative' }}>
             <Map
-              mapboxToken={mapboxToken}
               stateAbbr="CA"
               activeLayer={activeLayer}
               pm25SubLayer={pm25SubLayer}
