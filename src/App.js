@@ -7,6 +7,7 @@ import Navigation from './components/Navigation';
 import About from './components/About';
 import Partners from './components/Partners';
 import Methodology from './components/Methodology';
+import { apiCall } from './utils/api';
 import './styles/style.css';
 
 const PM25_LAYERS = ['average', 'max', 'pop_weighted'];
@@ -143,7 +144,7 @@ function App() {
       params.append('start_date', startDate.toISOString().split('T')[0]);
       params.append('end_date', endDate.toISOString().split('T')[0]);
     }
-    const response = await fetch(`http://localhost:8000${endpoint}?${params}`);
+    const response = await fetch(`${process.env.REACT_APP_API_BASE_URL || ''}${endpoint}?${params}`);
     if (!response.ok) return null;
     const data = await response.json();
     return data;
