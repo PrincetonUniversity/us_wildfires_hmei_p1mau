@@ -163,8 +163,16 @@ try:
         print('Loading counties...')
         loader.load_counties()
 
-        print('Loading population data...')
+        print('Loading population data (2006-2008 from CSV)...')
         loader.load_population_data()
+
+        print('Loading population data (2009-2023 from Census API)...')
+        # Check if Census API key is available
+        if os.getenv('CENSUS_API_KEY'):
+            loader.load_population_data_api()
+        else:
+            print('WARNING: CENSUS_API_KEY not set. Skipping Census API population data (2009-2023).')
+            print('The application will only have population data for 2006-2008.')
 
         print('Loading PM2.5 data...')
         loader.load_pm25_data()
