@@ -348,27 +348,42 @@ class DataLoader:
 
         # Age group mapping: group index -> [male_var, female_var, ...]
         ACS_AGE_VARIABLES = {
-            1:  ['B01001_003E', 'B01001_027E'],  # 0-4 years
-            2:  ['B01001_004E', 'B01001_028E'],  # 5-9 years
-            3:  ['B01001_005E', 'B01001_029E'],  # 10-14 years
-            # 15-19 years
+            # 0–4 years
+            1:  ['B01001_003E', 'B01001_027E'],
+            # 5–9 years
+            2:  ['B01001_004E', 'B01001_028E'],
+            # 10–14 years
+            3:  ['B01001_005E', 'B01001_029E'],
+            # 15–19 years
             4:  ['B01001_006E', 'B01001_007E', 'B01001_030E', 'B01001_031E'],
-            # 20-24 years
-            5:  ['B01001_008E', 'B01001_009E', 'B01001_032E', 'B01001_033E'],
-            6:  ['B01001_010E', 'B01001_034E'],  # 25-29 years
-            7:  ['B01001_011E', 'B01001_035E'],  # 30-34 years
-            8:  ['B01001_012E', 'B01001_036E'],  # 35-39 years
-            9:  ['B01001_013E', 'B01001_037E'],  # 40-44 years
-            10: ['B01001_014E', 'B01001_038E'],  # 45-49 years
-            11: ['B01001_015E', 'B01001_039E'],  # 50-54 years
-            12: ['B01001_016E', 'B01001_040E'],  # 55-59 years
-            # 60-64 years
-            13: ['B01001_017E', 'B01001_018E', 'B01001_041E', 'B01001_042E'],
-            14: ['B01001_019E', 'B01001_043E'],  # 65-69 years
-            15: ['B01001_020E', 'B01001_044E'],  # 70-74 years
-            16: ['B01001_021E', 'B01001_045E'],  # 75-79 years
-            17: ['B01001_022E', 'B01001_046E'],  # 80-84 years
-            18: ['B01001_023E', 'B01001_047E'],  # 85+ years
+            5:  ['B01001_008E', 'B01001_009E', 'B01001_010E',
+                 'B01001_032E', 'B01001_033E', 'B01001_034E'],                 # 20–24 years
+            # 25–29 years
+            6:  ['B01001_011E', 'B01001_035E'],
+            # 30–34 years
+            7:  ['B01001_012E', 'B01001_036E'],
+            # 35–39 years
+            8:  ['B01001_013E', 'B01001_037E'],
+            # 40–44 years
+            9:  ['B01001_014E', 'B01001_038E'],
+            # 45–49 years
+            10: ['B01001_015E', 'B01001_039E'],
+            # 50–54 years
+            11: ['B01001_016E', 'B01001_040E'],
+            # 55–59 years
+            12: ['B01001_017E', 'B01001_041E'],
+            # 60–64 years
+            13: ['B01001_018E', 'B01001_019E', 'B01001_042E', 'B01001_043E'],
+            # 65–69 years
+            14: ['B01001_020E', 'B01001_021E', 'B01001_044E', 'B01001_045E'],
+            # 70–74 years
+            15: ['B01001_022E', 'B01001_046E'],
+            # 75–79 years
+            16: ['B01001_023E', 'B01001_047E'],
+            # 80–84 years
+            17: ['B01001_024E', 'B01001_048E'],
+            # 85+ years
+            18: ['B01001_025E', 'B01001_049E'],
         }
 
         def sum_age_group(row, var_list):
@@ -487,7 +502,7 @@ class DataLoader:
                         population=population_value
                     ))
                     # Insert age group populations (using proportional distribution from 2021)
-                    # For now, we'll use a simple distribution - you can adjust this if needed
+                    # For now, we'll use a simple distribution - this can be adjusted if needed
                     for age_group in range(1, 19):
                         # Use a simple proportional distribution based on 2021 ratios
                         # This is a placeholder - you might want to adjust the age group distribution
@@ -1735,7 +1750,7 @@ class DataLoader:
 
             # --- Population totals: US and by state ---
             # Find the latest year in the population table
-            latest_year = self.db.query(func.max(Population.year)).scalar()
+            latest_year = self.db.query(func.min(Population.year)).scalar()
             logger.info(f"Latest year in population table: {latest_year}")
 
             # Query all population records for the latest year (sum across all age groups)
@@ -1771,8 +1786,8 @@ def main():
             # loader.load_counties()
 
             # Step 3: Load population data (from API for 2009-2023)
-            loader.load_population_data()
-            loader.load_population_data_api()
+            # loader.load_population_data()
+            # loader.load_population_data_api()
 
             # Step 4: Load baseline mortality rates
             # loader.load_baseline_mortality()
@@ -1790,7 +1805,7 @@ def main():
             # loader.load_fire_attribution_bins()
 
             # Step 9: Compute and store excess mortality summary
-            loader.excess_mortality_summary()
+            # loader.excess_mortality_summary()
             # loader.switch_default_method() # if need to change default method
 
             # Step 10: Load exceedance summary
@@ -1800,7 +1815,7 @@ def main():
             # loader.load_decomposition_summary()
 
             # Step 12: Validate data
-            # loader.validate_data()
+            loader.validate_data()
 
         logger.info("=== Data Loading Process Completed Successfully ===")
 
