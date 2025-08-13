@@ -219,5 +219,37 @@ elif [ $DB_CHECK_EXIT_CODE -ne 0 ]; then
     exit 1
 fi
 
+# If database initialized, optionally backfill missing Census API population years (2009-2023)
+if [ $DB_CHECK_EXIT_CODE -eq 0 ]; then
+    if [ -n "${CENSUS_API_KEY}" ]; then
+        echo "Checking for missing Census population years (2009-2023) to backfill..."
+        python -c "
+import os
+from sqlalchemy import create_engine, text
+from db.database import SessionLocal
+from db.load_data import DataLoader
+
+engine = create_engine(os.getenv('DATABASE_URL'))
+with engine.connect() as conn:
+        existing_years = conn.execute(text('SELECT DISTINCT year FROM population WHERE year BETWEEN 2009 AND 2023 ORDER BY year')).fetchall()
+        existing_years = sorted({r[0] for r in existing_years})
+        target_years = list(range(2009, 2024))
+        missing = [y for y in target_years if y not in existing_years]
+        print(f'Existing Census population years in DB: {existing_years}')
+        if missing:
+                print(f'Missing years will be backfilled via Census API: {missing}')
+                with DataLoader() as loader:
+                        loader.load_population_data_api(restrict_years=missing)
+                        # Refresh aggregations only if we added new population data
+                        print('Recomputing aggregations after population backfill...')
+                        loader.preprocess_aggregations()
+        else:
+                print('No Census population backfill needed.')
+"
+    else
+        echo "CENSUS_API_KEY not set; skipping Census population backfill check."
+    fi
+fi
+
 echo "Starting the application..."
 exec python app.py
