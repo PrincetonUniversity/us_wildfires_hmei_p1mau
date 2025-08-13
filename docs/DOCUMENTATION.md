@@ -600,7 +600,7 @@ Component Re-render → API Call → Data Update → UI Update
 
 ### Base URL
 ```
-http://localhost:8000
+https://usfirepollution.mauzerall.scholar.princeton.edu
 ```
 
 ### Authentication

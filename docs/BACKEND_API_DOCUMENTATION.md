@@ -7,7 +7,7 @@ The PM₂.₅ Wildfire Impact Map backend provides a comprehensive REST API buil
 ## Base URL
 
 ```
-http://localhost:8000
+https://usfirepollution.mauzerall.scholar.princeton.edu
 ```
 
 ## Authentication
@@ -53,7 +53,7 @@ Returns excess mortality data as GeoJSON for choropleth visualization.
 
 **Example Request:**
 ```bash
-curl "http://localhost:8000/api/counties/choropleth/mortality?year=2020&sub_metric=fire&age_group=1,2,3"
+curl "https://usfirepollution.mauzerall.scholar.princeton.edu/api/counties/choropleth/mortality?year=2020&sub_metric=fire&age_group=1,2,3"
 ```
 
 **Response:**
@@ -113,7 +113,7 @@ Returns average PM₂.₅ data as GeoJSON.
 
 **Example Request:**
 ```bash
-curl "http://localhost:8000/api/counties/choropleth/average?time_scale=yearly&year=2020&sub_metric=fire"
+curl "https://usfirepollution.mauzerall.scholar.princeton.edu/api/counties/choropleth/average?time_scale=yearly&year=2020&sub_metric=fire"
 ```
 
 **Response:**
@@ -316,7 +316,7 @@ Returns time series data for a specific county.
 
 **Example Request:**
 ```bash
-curl "http://localhost:8000/api/pm25/bar_chart/06001?time_scale=yearly&start_year=2018&end_year=2020"
+curl "https://usfirepollution.mauzerall.scholar.princeton.edu/api/pm25/bar_chart/06001?time_scale=yearly&start_year=2018&end_year=2020"
 ```
 
 **Response:**
@@ -371,7 +371,7 @@ Returns excess mortality summary data.
 
 **Example Request:**
 ```bash
-curl "http://localhost:8000/api/excess_mortality?year=2020&fips=06001&sub_metric=fire"
+curl "https://usfirepollution.mauzerall.scholar.princeton.edu/api/excess_mortality?year=2020&fips=06001&sub_metric=fire"
 ```
 
 **Response:**
@@ -410,7 +410,7 @@ Returns decomposition analysis for factors contributing to mortality changes.
 
 **Example Request:**
 ```bash
-curl "http://localhost:8000/api/counties/decomp/06001?pm25_type=fire"
+curl "https://usfirepollution.mauzerall.scholar.princeton.edu/api/counties/decomp/06001?pm25_type=fire"
 ```
 
 **Response:**
@@ -451,7 +451,7 @@ Returns statistical summaries across all counties.
 
 **Example Request:**
 ```bash
-curl "http://localhost:8000/api/counties/statistics?time_scale=yearly&year=2020"
+curl "https://usfirepollution.mauzerall.scholar.princeton.edu/api/counties/statistics?time_scale=yearly&year=2020"
 ```
 
 **Response:**
@@ -527,7 +527,7 @@ Downloads PM₂.₅ data as CSV for research and analysis.
 
 **Example Request:**
 ```bash
-curl "http://localhost:8000/api/download/pm25?time_scale=yearly&start_year=2020&end_year=2023"
+curl "https://usfirepollution.mauzerall.scholar.princeton.edu/api/download/pm25?time_scale=yearly&start_year=2020&end_year=2023"
 ```
 
 **Response:**
@@ -555,7 +555,7 @@ Downloads excess mortality data as CSV for health impact analysis.
 
 **Example Request:**
 ```bash
-curl "http://localhost:8000/api/download/mortality?start_year=2020&end_year=2023&age_groups=1,2,3"
+curl "https://usfirepollution.mauzerall.scholar.princeton.edu/api/download/mortality?start_year=2020&end_year=2023&age_groups=1,2,3"
 ```
 
 **Response:**
@@ -586,7 +586,7 @@ Downloads Years of Life Lost (YLL) data as CSV for comprehensive health impact a
 
 **Example Request:**
 ```bash
-curl "http://localhost:8000/api/download/yll?start_year=2020&end_year=2023&age_groups=1,2,3"
+curl "https://usfirepollution.mauzerall.scholar.princeton.edu/api/download/yll?start_year=2020&end_year=2023&age_groups=1,2,3"
 ```
 
 **Response:**
