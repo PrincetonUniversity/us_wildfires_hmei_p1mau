@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
 import Typography from '@mui/material/Typography';
@@ -48,8 +48,60 @@ const Sidebar = ({
     selectedAgeGroups,
     setSelectedAgeGroups,
     mortalitySubMetric,
-    setMortalitySubMetric
+    setMortalitySubMetric,
+    onWidthChange
 }) => {
+    const [sidebarWidth, setSidebarWidth] = useState(400); // Reduced from 500 to 400
+    const [isDragging, setIsDragging] = useState(false);
+    const dragStartX = useRef(0);
+    const dragStartWidth = useRef(0);
+
+    // Notify parent when width changes
+    useEffect(() => {
+        if (onWidthChange) {
+            // Debounce the width change to prevent too frequent map updates during dragging
+            const timeoutId = setTimeout(() => {
+                onWidthChange(sidebarWidth);
+            }, isDragging ? 100 : 0);
+
+            return () => clearTimeout(timeoutId);
+        }
+    }, [sidebarWidth, onWidthChange, isDragging]);
+
+    const handleMouseDown = (e) => {
+        setIsDragging(true);
+        dragStartX.current = e.clientX;
+        dragStartWidth.current = sidebarWidth;
+        document.body.style.cursor = 'ew-resize';
+        document.body.style.userSelect = 'none';
+    };
+
+    const handleMouseMove = (e) => {
+        if (!isDragging) return;
+
+        const deltaX = dragStartX.current - e.clientX;
+        const newWidth = Math.max(350, Math.min(500, dragStartWidth.current + deltaX));
+        setSidebarWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+        setIsDragging(false);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    };
+
+    useEffect(() => {
+        if (isDragging) {
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+
+            return () => {
+                document.removeEventListener('mousemove', handleMouseMove);
+                document.removeEventListener('mouseup', handleMouseUp);
+            };
+        }
+    }, [isDragging]);
+
     const handleChange = (event) => {
         let value = event.target.value;
         if (value.includes('all')) {
@@ -72,7 +124,7 @@ const Sidebar = ({
     return (
         <Box
             sx={{
-                width: 500,
+                width: sidebarWidth,
                 height: '100vh',
                 display: 'flex',
                 flexDirection: 'column',
@@ -85,6 +137,27 @@ const Sidebar = ({
                 overflow: 'hidden',
             }}
         >
+            {/* Drag handle */}
+            <Box
+                sx={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: '4px',
+                    cursor: 'ew-resize',
+                    backgroundColor: 'transparent',
+                    '&:hover': {
+                        backgroundColor: 'rgba(0, 0, 0, 0.1)',
+                    },
+                    '&:active': {
+                        backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                    },
+                    zIndex: 20,
+                }}
+                onMouseDown={handleMouseDown}
+            />
+
             {/* Layer and Time Controls (moved from Map.js) */}
             <Paper elevation={0} sx={{
                 flex: '0 0 auto',
@@ -180,7 +253,8 @@ const Sidebar = ({
             }}>
                 <CountyInfoPanel
                     selectedCounty={hoveredCounty || selectedCounty}
-                    onClearSelectedCounty={onClearSelectedCounty}
+                    onClearSelectedCounty={selectedCounty ? onClearSelectedCounty : null}
+                    sidebarWidth={sidebarWidth}
                 />
             </Box>
         </Box>

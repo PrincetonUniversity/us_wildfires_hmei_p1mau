@@ -9,11 +9,12 @@ const COLORS = {
     total_change: "#5f7d7aff" // gray
 };
 
-export default function CountyDecompositionChart({ decompositionData }) {
+export default function CountyDecompositionChart({ decompositionData, containerWidth = 420 }) {
     if (!decompositionData) {
         return (
             <div style={{
-                width: 420,
+                width: '100%',
+                maxWidth: containerWidth,
                 height: 200,
                 display: 'flex',
                 alignItems: 'center',
@@ -25,6 +26,10 @@ export default function CountyDecompositionChart({ decompositionData }) {
             </div>
         );
     }
+
+    // Calculate responsive dimensions
+    const chartWidth = Math.min(containerWidth - 20, 400); // Leave 20px padding
+    const chartHeight = 200;
 
     // Format data for the chart
     const chartData = [
@@ -115,10 +120,10 @@ export default function CountyDecompositionChart({ decompositionData }) {
     const yDomain = [-roundedMax, roundedMax];
 
     return (
-        <div style={{ width: 470, boxSizing: 'border-box' }}>
+        <div style={{ width: '100%', maxWidth: containerWidth, boxSizing: 'border-box' }}>
             <BarChart
-                width={400}
-                height={250}
+                width={chartWidth}
+                height={chartHeight}
                 data={dataWithPercentages}
                 margin={{ top: 20, right: 30, left: 20, bottom: 50 }}
                 barSize={30}

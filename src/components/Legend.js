@@ -9,24 +9,24 @@ const Legend = ({ activeLayer }) => {
       return {
         title: 'Total PM2.5 (µg/m³)',
         colors: [
-          { color: '#fff7bc', label: '0' },
-          { color: '#fee391', label: '2.5' },
-          { color: '#fec44f', label: '5' },
-          { color: '#fe9929', label: '7.5' },
-          { color: '#ec7014', label: '10' },
-          { color: '#cc4c02', label: '12.5+' }
+          { color: '#fff7bc', label: '0 µg/m³' },
+          { color: '#fee391', label: '2.5 µg/m³' },
+          { color: '#fec44f', label: '5 µg/m³' },
+          { color: '#fe9929', label: '7.5 µg/m³' },
+          { color: '#ec7014', label: '10 µg/m³' },
+          { color: '#cc4c02', label: '12.5+ µg/m³' }
         ]
       };
     } else {
       return {
         title: 'Fire PM2.5 (µg/m³)',
         colors: [
-          { color: '#fff7bc', label: '0' },
-          { color: '#fee391', label: '0.5' },
-          { color: '#fec44f', label: '1.0' },
-          { color: '#fe9929', label: '1.5' },
-          { color: '#ec7014', label: '2.0' },
-          { color: '#cc4c02', label: '2.5+' }
+          { color: '#fff7bc', label: '0 µg/m³' },
+          { color: '#fee391', label: '0.5 µg/m³' },
+          { color: '#fec44f', label: '1.0 µg/m³' },
+          { color: '#fe9929', label: '1.5 µg/m³' },
+          { color: '#ec7014', label: '2.0 µg/m³' },
+          { color: '#cc4c02', label: '2.5+ µg/m³' }
         ]
       };
     }

@@ -162,15 +162,62 @@ const categoryMeanings = [
   'Exceeding after excluding fire smoke on Tier 1,2,3 days'
 ];
 
-const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelect, onCountyHover, mapRefreshKey, onMapLoaded, selectedCounty, selectedAgeGroups }) => {
+const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelect, onCountyHover, mapRefreshKey, onMapLoaded, selectedCounty, selectedAgeGroups, sidebarWidth = 400 }) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const popup = useRef(null); // Persistent popup
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [mapLoaded, setMapLoaded] = useState(false);
   const [choroplethData, setChoroplethData] = useState(null);
   const [decompositionPM25Type, setDecompositionPM25Type] = useState("total");
   const currentCountyRef = useRef(null);
+
+
+
+  // Function to adjust map bounds based on sidebar width
+  const adjustMapBounds = () => {
+    if (!map.current || !map.current.loaded()) return;
+
+    // Base bounds for CONUS (continental United States)
+    const baseBounds = [-127.0, 25.0, -65.0, 50.0];
+
+    // Calculate dynamic padding based on sidebar width
+    // As sidebar gets wider, increase left padding to keep US centered
+    const leftPadding = Math.max(20, Math.min(120, (sidebarWidth - 400) * 0.4));
+    const rightPadding = 20;
+    const topPadding = 20;
+    const bottomPadding = 20;
+
+    // Calculate the center point of the US
+    const centerLng = (baseBounds[0] + baseBounds[2]) / 2;
+    const centerLat = (baseBounds[1] + baseBounds[3]) / 2;
+
+    // Calculate zoom level based on sidebar width
+    // Wider sidebar = more zoom to keep US visible
+    const baseZoom = 4.5;
+    const zoomAdjustment = Math.max(0, (sidebarWidth - 400) * 0.001);
+    const targetZoom = Math.min(5.5, baseZoom + zoomAdjustment);
+
+    // Use fitBounds with dynamic padding for better control
+    map.current.fitBounds(baseBounds, {
+      padding: {
+        top: topPadding,
+        bottom: bottomPadding,
+        left: leftPadding,
+        right: rightPadding
+      },
+      duration: 300, // Smooth transition
+      maxZoom: targetZoom
+    });
+  };
+
+  // Adjust map bounds when sidebar width changes
+  useEffect(() => {
+    if (mapLoaded && sidebarWidth) {
+      adjustMapBounds();
+    }
+  }, [sidebarWidth, mapLoaded]);
 
   // Destructure time controls
   const { timeScale, year, month, season } = timeControls;
@@ -192,73 +239,86 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
     }
   }
 
-  // Fetch choropleth data when mapRefreshKey or any relevant prop changes
-  useEffect(() => {
+  // Function to fetch choropleth data
+  const fetchChoroplethData = async () => {
     if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer) && !EXCEEDANCE_LAYERS.includes(activeLayer)) return;
-    let isMounted = true;
-    const fetchChoroplethData = async () => {
-      try {
-        setLoading(true);
-        let endpoint = '/api/counties/choropleth/average';
-        let url = '';
-        if (PM25_LAYERS.includes(activeLayer)) {
-          let params = new URLSearchParams();
-          // PM2.5 layers
-          params.append('time_scale', timeScale);
-          if (year) params.append('year', year.toString());
-          if (timeScale === 'monthly' && month) params.append('month', month.toString());
-          if (timeScale === 'seasonal' && season) params.append('season', season);
+
+    try {
+      setLoading(true);
+      let endpoint = '/api/counties/choropleth/average';
+      let url = '';
+
+      if (PM25_LAYERS.includes(activeLayer)) {
+        let params = new URLSearchParams();
+        // PM2.5 layers
+        params.append('time_scale', timeScale);
+        if (year) params.append('year', year.toString());
+        if (timeScale === 'monthly' && month) params.append('month', month.toString());
+        if (timeScale === 'seasonal' && season) params.append('season', season);
+        params.append('sub_metric', subMetric);
+        if (metric === 'max') endpoint = '/api/counties/choropleth/max';
+        if (metric === 'pop_weighted') endpoint = '/api/counties/choropleth/pop_weighted';
+        url = `${API_BASE_URL}${endpoint}?${params}`;
+      } else if (HEALTH_LAYERS.includes(activeLayer)) {
+        let params = new URLSearchParams();
+        if (activeLayer === 'mortality') {
+          endpoint = '/api/counties/choropleth/mortality';
+          params.append('year', year.toString());
           params.append('sub_metric', subMetric);
-          if (metric === 'max') endpoint = '/api/counties/choropleth/max';
-          if (metric === 'pop_weighted') endpoint = '/api/counties/choropleth/pop_weighted';
-          url = `${API_BASE_URL}${endpoint}?${params}`;
-        } else if (HEALTH_LAYERS.includes(activeLayer)) {
-          let params = new URLSearchParams();
-          if (activeLayer === 'mortality') {
-            endpoint = '/api/counties/choropleth/mortality';
-            params.append('year', year.toString());
-            params.append('sub_metric', subMetric);
-            if (selectedAgeGroups && selectedAgeGroups.length > 0) {
-              params.append('age_group', selectedAgeGroups.join(','));
-            }
-          } else if (activeLayer === 'yll') {
-            endpoint = '/api/counties/choropleth/yll';
-            params.append('year', year.toString());
-            params.append('sub_metric', subMetric);
-            if (selectedAgeGroups && selectedAgeGroups.length > 0) {
-              params.append('age_group', selectedAgeGroups.join(','));
-            }
-          } else if (activeLayer === 'population') {
-            endpoint = '/api/counties/choropleth/population';
-            params.append('year', year.toString());
+          if (selectedAgeGroups && selectedAgeGroups.length > 0) {
+            params.append('age_groups', selectedAgeGroups.join(','));
           }
           url = `${API_BASE_URL}${endpoint}?${params}`;
-        } else if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
-          endpoint = '/api/counties/exceedance';
-          url = `${API_BASE_URL}${endpoint}`;
+        } else if (activeLayer === 'yll') {
+          endpoint = '/api/counties/choropleth/yll';
+          params.append('year', year.toString());
+          params.append('sub_metric', subMetric);
+          if (selectedAgeGroups && selectedAgeGroups.length > 0) {
+            params.append('age_groups', selectedAgeGroups.join(','));
+          }
+          url = `${API_BASE_URL}${endpoint}?${params}`;
+        } else if (activeLayer === 'population') {
+          endpoint = '/api/counties/choropleth/population';
+          params.append('year', year.toString());
+          url = `${API_BASE_URL}${endpoint}?${params}`;
         }
+      } else if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
+        let params = new URLSearchParams();
+        params.append('year', year.toString());
+        if (timeScale === 'monthly' && month) params.append('month', month.toString());
+        if (timeScale === 'seasonal' && season) params.append('season', season);
+        if (activeLayer === 'exceedance_8') {
+          endpoint = '/api/counties/exceedance';
+          params.append('threshold', '8');
+        } else if (activeLayer === 'exceedance_9') {
+          endpoint = '/api/counties/exceedance';
+          params.append('threshold', '9');
+        }
+        url = `${API_BASE_URL}${endpoint}?${params}`;
+      }
+
+      if (url) {
         const response = await fetch(url);
         if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Failed to fetch choropleth data: ${response.status} ${response.statusText}\n${errorText}`);
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
-
-        if (isMounted) {
+        if (data && data.features) {
           setChoroplethData(data);
-          setLoading(false);
-          if (onMapLoaded) onMapLoaded();
-        }
-      } catch (err) {
-        if (isMounted) {
-          setError(err.message);
-          setLoading(false);
-          if (onMapLoaded) onMapLoaded();
+          updateLegend();
         }
       }
-    };
+    } catch (error) {
+      console.error('Error fetching choropleth data:', error);
+      setError(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch choropleth data when mapRefreshKey or any relevant prop changes
+  useEffect(() => {
     fetchChoroplethData();
-    return () => { isMounted = false; };
   }, [mapRefreshKey, activeLayer, timeScale, year, month, season, pm25SubLayer, selectedAgeGroups, subMetric]);
 
 
@@ -401,7 +461,12 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
     } else if (activeLayer === 'mortality') {
       minLabel.textContent = colorScale[0][0].toFixed(3) + '%';
     } else {
-      minLabel.textContent = colorScale[0][0].toFixed(1);
+      // For PM2.5 layers, add µg/m³ units
+      if (['average', 'max', 'pop_weighted'].includes(activeLayer)) {
+        minLabel.textContent = colorScale[0][0].toFixed(1) + ' µg/m³';
+      } else {
+        minLabel.textContent = colorScale[0][0].toFixed(1);
+      }
     }
     const maxLabel = document.createElement('span');
     if (activeLayer === 'yll') {
@@ -411,7 +476,12 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
     } else if (activeLayer === 'mortality') {
       maxLabel.textContent = `${colorScale[colorScale.length - 1][0].toFixed(3)}%+`;
     } else {
-      maxLabel.textContent = `${colorScale[colorScale.length - 1][0].toFixed(1)}+`;
+      // For PM2.5 layers, add µg/m³ units
+      if (['average', 'max', 'pop_weighted'].includes(activeLayer)) {
+        maxLabel.textContent = `${colorScale[colorScale.length - 1][0].toFixed(1)} µg/m³+`;
+      } else {
+        maxLabel.textContent = `${colorScale[colorScale.length - 1][0].toFixed(1)}+`;
+      }
     }
     labels.appendChild(minLabel);
     labels.appendChild(maxLabel);
@@ -455,9 +525,9 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
   const fetchBarChartData = async (fips, currentTimeScale = timeScale, currentYear = year, currentMonth = month, currentSeason = season) => {
     try {
       let params = new URLSearchParams();
-      let endpoint = `${API_BASE_URL}/pm25/bar_chart/${fips}`;
+      let endpoint = `${API_BASE_URL}/api/pm25/bar_chart/${fips}`;
 
-      // console.log('Fetching bar chart data with time scale:', currentTimeScale);
+
 
       // Add parameters based on the time scale
       if (currentTimeScale === 'yearly') {
@@ -503,7 +573,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
         params.append('end_date', endDate.toISOString().split('T')[0]);
       }
 
-      // console.log('Fetching bar chart data with params:', params.toString());
+
       const response = await fetch(`${endpoint}?${params}`);
       if (!response.ok) {
         const errorText = await response.text();
@@ -512,7 +582,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
       }
 
       const data = await response.json();
-      // console.log('Received bar chart data:', data);
+
 
       // Ensure data is an array
       if (!Array.isArray(data)) {
@@ -616,7 +686,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
   // Function to fetch mortality bar chart data for a specific county
   const fetchMortalityBarChartData = async (fips) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/excess_mortality?fips=${fips}`);
+      const response = await fetch(`${API_BASE_URL}/api/excess_mortality?fips=${fips}`);
       if (!response.ok) return [];
       const data = await response.json();
       // Only keep years 2006-2023, sort by year
@@ -639,7 +709,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
   // Function to fetch decomposition data for a specific county
   const fetchDecompositionData = async (fips, pm25Type = "total") => {
     try {
-      const response = await fetch(`${API_BASE_URL}/counties/decomp/${fips}?pm25_type=${pm25Type}`);
+      const response = await fetch(`${API_BASE_URL}/api/counties/decomp/${fips}?pm25_type=${pm25Type}`);
       if (!response.ok) return null;
       const data = await response.json();
       return data.decomposition;
@@ -650,18 +720,25 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
 
   // Initialize map when component mounts
   useEffect(() => {
-    // console.log('Map initialization useEffect triggered:', { activeLayer, pm25SubLayer, PM25_LAYERS: PM25_LAYERS.includes(activeLayer), HEALTH_LAYERS: HEALTH_LAYERS.includes(activeLayer), EXCEEDANCE_LAYERS: EXCEEDANCE_LAYERS.includes(activeLayer) });
-
     if (!mapContainer.current) return;
 
     map.current = new maplibregl.Map({
       container: mapContainer.current,
       style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
-      bounds: [-150.0, 24.0, -60.0, 50.0],
+      bounds: [-127.0, 25.0, -65.0, 50.0],
       padding: { top: 20, bottom: 20, left: 20, right: 20 }
     });
     map.current.dragRotate.disable();
     map.current.touchZoomRotate.disableRotation();
+
+    // Add map load event handler
+    map.current.on('load', () => {
+      setMapLoaded(true);
+      onMapLoaded();
+      fetchChoroplethData();
+      // Initial adjustment of map bounds
+      setTimeout(() => adjustMapBounds(), 100);
+    });
 
     // Create popup instance ONCE
     popup.current = new maplibregl.Popup({
@@ -818,7 +895,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
 
 
 
-    // console.log('Using metric for color:', metricForColor);
+
 
     // Remove the layer if it exists
     if (mapInstance.getLayer('pm25-layer')) {
@@ -860,12 +937,6 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
         'fill-outline-color': 'rgba(0,0,0,0.2)'
       }
     };
-
-
-
-
-
-
 
     // Add the layer
     mapInstance.addLayer(layerConfig, 'boundary_county');

@@ -180,11 +180,11 @@ const LayerTimeControls = ({
                                     size="small"
                                     sx={{
                                         ...pillStyle,
-                                        bgcolor: activeLayer === opt.value ? 'primary.main' : 'white',
-                                        color: activeLayer === opt.value ? 'white' : 'primary.main',
-                                        borderColor: 'primary.main',
+                                        bgcolor: activeLayer === opt.value ? '#e9ae40' : 'white',
+                                        color: activeLayer === opt.value ? 'white' : '#e9ae40',
+                                        borderColor: '#e9ae40',
                                         '&:hover': {
-                                            bgcolor: activeLayer === opt.value ? 'primary.dark' : 'primary.light',
+                                            bgcolor: activeLayer === opt.value ? '#be8a29' : '#f4d8a8',
                                             color: 'white'
                                         }
                                     }}
@@ -207,11 +207,11 @@ const LayerTimeControls = ({
                                             size="small"
                                             sx={{
                                                 ...pillStyle,
-                                                bgcolor: pm25SubLayer === opt.value ? 'primary.main' : 'white',
-                                                color: pm25SubLayer === opt.value ? 'white' : 'primary.main',
-                                                borderColor: 'primary.main',
+                                                bgcolor: pm25SubLayer === opt.value ? '#e9ae40' : 'white',
+                                                color: pm25SubLayer === opt.value ? 'white' : '#e9ae40',
+                                                borderColor: '#e9ae40',
                                                 '&:hover': {
-                                                    bgcolor: pm25SubLayer === opt.value ? 'primary.dark' : 'primary.light',
+                                                    bgcolor: pm25SubLayer === opt.value ? '#be8a29' : '#f4d8a8',
                                                     color: 'white'
                                                 }
                                             }}
@@ -235,13 +235,14 @@ const LayerTimeControls = ({
                             <Button
                                 key={opt.value}
                                 size="small"
+                                className={activeLayer === opt.value ? 'health-metric-active' : 'health-metric-inactive'}
                                 sx={{
                                     ...pillStyle,
-                                    bgcolor: activeLayer === opt.value ? 'secondary.main' : 'white',
-                                    color: activeLayer === opt.value ? 'white' : 'secondary.main',
-                                    borderColor: 'secondary.main',
+                                    bgcolor: activeLayer === opt.value ? '#dc004e' : 'white',
+                                    color: activeLayer === opt.value ? 'white' : '#dc004e',
+                                    borderColor: '#dc004e',
                                     '&:hover': {
-                                        bgcolor: activeLayer === opt.value ? 'secondary.dark' : 'secondary.light',
+                                        bgcolor: activeLayer === opt.value ? '#a7003a' : '#ff6b9d',
                                         color: 'white'
                                     }
                                 }}
@@ -261,14 +262,14 @@ const LayerTimeControls = ({
                                         size="small"
                                         sx={{
                                             ...pillStyle,
-                                            bgcolor: mortalitySubMetric === opt.value ? 'secondary.main' : 'white',
-                                            color: mortalitySubMetric === opt.value ? 'white' : 'secondary.main',
-                                            borderColor: 'secondary.main',
+                                            bgcolor: mortalitySubMetric === opt.value ? '#d32f2f' : 'white',
+                                            color: mortalitySubMetric === opt.value ? 'white' : '#d32f2f',
+                                            borderColor: '#d32f2f',
                                             px: 1,
                                             py: 0.2,
                                             m: 0.1,
                                             '&:hover': {
-                                                bgcolor: mortalitySubMetric === opt.value ? 'secondary.dark' : 'secondary.light',
+                                                bgcolor: mortalitySubMetric === opt.value ? '#b71c1c' : '#ffcdd2',
                                                 color: 'white'
                                             }
                                         }}
@@ -288,6 +289,7 @@ const LayerTimeControls = ({
                 <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
                     <Button
                         size="small"
+                        className={activeLayer === 'exceedance_8' ? 'exceedance-active' : 'exceedance-inactive'}
                         sx={{
                             ...pillStyle,
                             bgcolor: activeLayer === 'exceedance_8' ? '#4dd0e1' : 'white',
@@ -304,6 +306,7 @@ const LayerTimeControls = ({
                     </Button>
                     <Button
                         size="small"
+                        className={activeLayer === 'exceedance_9' ? 'exceedance-active' : 'exceedance-inactive'}
                         sx={{
                             ...pillStyle,
                             bgcolor: activeLayer === 'exceedance_9' ? '#4dd0e1' : 'white',

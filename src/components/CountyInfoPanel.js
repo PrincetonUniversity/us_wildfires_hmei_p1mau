@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import CountyBarChart from './CountyBarChart';
@@ -13,7 +13,19 @@ const categoryMeanings = [
     'Exceeding after excluding fire smoke on Tier 1,2,3 days'
 ];
 
-const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
+const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty, sidebarWidth = 400 }) => {
+    const [expandedChart, setExpandedChart] = useState(null);
+
+    const handleChartExpand = (chartType) => {
+        if (expandedChart === chartType) {
+            // If clicking the same chart type, close it
+            setExpandedChart(null);
+        } else {
+            // If clicking a different chart type, expand it (and close others)
+            setExpandedChart(chartType);
+        }
+    };
+
     if (!selectedCounty) {
         return (
             <Box>
@@ -22,6 +34,10 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
             </Box>
         );
     }
+
+    // Check if this is a selected county (has onClearSelectedCounty) or just hovered
+    // Only show X button when onClearSelectedCounty is actually provided (not null)
+    const isSelectedCounty = onClearSelectedCounty !== null && onClearSelectedCounty !== undefined;
     const {
         name,
         value,
@@ -129,8 +145,8 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
 
     return (
         <Box sx={{ fontSize: '0.97em', p: 0.5, pb: 2, position: 'relative' }}>
-            {/* X button for clearing selection */}
-            {onClearSelectedCounty && (
+            {/* X button for clearing selection - only show when county is actually selected */}
+            {isSelectedCounty && (
                 <button
                     onClick={onClearSelectedCounty}
                     aria-label="Clear selected county"
@@ -172,35 +188,75 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
                     <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.2 }}>
                         <strong>Threshold 8 µg/m³:</strong> {selectedCounty.threshold_8 !== undefined && selectedCounty.threshold_8 !== null ? selectedCounty.threshold_8 : 'N/A'}
                         {selectedCounty.threshold_8 !== undefined && selectedCounty.threshold_8 !== null && (
-                            <> — <span style={{ color: '#1976d2' }}>{categoryMeanings[selectedCounty.threshold_8]}</span></>
+                            <> — <span className="threshold-category">{categoryMeanings[selectedCounty.threshold_8]}</span></>
                         )}
                     </Typography>
                     <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.2 }}>
                         <strong>Threshold 9 µg/m³:</strong> {selectedCounty.threshold_9 !== undefined && selectedCounty.threshold_9 !== null ? selectedCounty.threshold_9 : 'N/A'}
                         {selectedCounty.threshold_9 !== undefined && selectedCounty.threshold_9 !== null && (
-                            <> — <span style={{ color: '#1976d2' }}>{categoryMeanings[selectedCounty.threshold_9]}</span></>
+                            <> — <span className="threshold-category">{categoryMeanings[selectedCounty.threshold_9]}</span></>
                         )}
                     </Typography>
                 </Box>
             )}
             {isBarChartDataForCurrentTimeScale() && (
-                <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
-                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: '1em', mb: 0.5 }}>
-                        {activeLayer === 'mortality' ? 'Excess Mortality Bar Chart' : activeLayer === 'yll' ? 'YLL Bar Chart' : 'PM2.5 Bar Chart'}
-                    </Typography>
-                    {activeLayer === 'mortality' ? (
-                        <CountyMortalityBarChart data={barChartData} timeScale="yearly" />
-                    ) : activeLayer === 'yll' ? (
-                        <CountyMortalityBarChart data={barChartData} timeScale="yearly" yllMode />
-                    ) : (
-                        <CountyBarChart key={timeScale} data={barChartData} timeScale={timeScale} />
-                    )}
+                <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }} className="chart-container">
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                        <Typography variant="subtitle2" fontWeight="bold" sx={{ fontSize: '1em' }}>
+                            {activeLayer === 'mortality' ? 'Excess Mortality Bar Chart' : activeLayer === 'yll' ? 'YLL Bar Chart' : 'PM2.5 Bar Chart'}
+                        </Typography>
+                        <button
+                            onClick={() => handleChartExpand('pm25')}
+                            title={expandedChart === 'pm25' ? "Close chart" : "Expand chart"}
+                            style={{
+                                background: expandedChart === 'pm25' ? '#f0f0f0' : 'transparent',
+                                border: '1px solid #bbb',
+                                borderRadius: '50%',
+                                width: 24,
+                                height: 24,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                padding: 0,
+                                fontSize: '12px'
+                            }}
+                        >
+                            {expandedChart === 'pm25' ? (
+                                <svg width="12" height="12" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <line x1="3" y1="3" x2="17" y2="17" stroke="#333" strokeWidth="2" />
+                                    <line x1="17" y1="3" x2="3" y2="17" stroke="#333" strokeWidth="2" />
+                                </svg>
+                            ) : (
+                                <svg width="12" height="12" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <circle cx="9" cy="9" r="7" stroke="#333" strokeWidth="2" />
+                                    <line x1="14.2" y1="14.2" x2="18" y2="18" stroke="#333" strokeWidth="2" strokeLinecap="round" />
+                                </svg>
+                            )}
+                        </button>
+                    </Box>
+                    <div className="chart-overflow-container" data-time-scale={timeScale}>
+                        {activeLayer === 'mortality' ? (
+                            <CountyMortalityBarChart data={barChartData} timeScale="yearly" containerWidth={sidebarWidth - 40} />
+                        ) : activeLayer === 'yll' ? (
+                            <CountyMortalityBarChart data={barChartData} timeScale="yearly" yllMode containerWidth={sidebarWidth - 40} />
+                        ) : (
+                            <CountyBarChart
+                                key={timeScale}
+                                data={barChartData}
+                                timeScale={timeScale}
+                                containerWidth={sidebarWidth - 40}
+                                isExpanded={expandedChart === 'pm25'}
+                                onExpand={() => setExpandedChart(null)}
+                            />
+                        )}
+                    </div>
                 </Box>
             )}
 
             {/* Decomposition Analysis Chart */}
             {decompositionData && activeLayer === 'mortality' && (
-                <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
+                <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }} className="chart-container">
                     <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: '1em', mb: 0.5 }}>
                         Decomposition Analysis (2006–2023) - {decompositionPM25Type === 'fire' ? 'Fire PM2.5' : 'Total PM2.5'}
                     </Typography>
@@ -208,7 +264,9 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty }) => {
                         Factor contribution to change in excess mortality
                     </Typography>
 
-                    <CountyDecompositionChart decompositionData={decompositionData} />
+                    <div className="chart-overflow-container">
+                        <CountyDecompositionChart decompositionData={decompositionData} containerWidth={sidebarWidth - 40} />
+                    </div>
                 </Box>
             )}
         </Box>

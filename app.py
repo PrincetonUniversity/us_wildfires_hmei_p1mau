@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Depends, status, BackgroundTasks, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from sqlalchemy import func, and_, extract
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -329,9 +330,17 @@ choropleth_router = APIRouter(
 
 
 def safe_float(val):
-    if val is None or not math.isfinite(val):
+    """Convert value to float, handling None, NaN, and infinite cases"""
+    if val is None:
         return 0.0
-    return float(val)
+    try:
+        result = float(val)
+        # Check if result is NaN or infinite
+        if math.isnan(result) or math.isinf(result):
+            return 0.0
+        return result
+    except (ValueError, TypeError):
+        return 0.0
 
 
 @choropleth_router.get("/mortality")
@@ -750,6 +759,11 @@ async def get_choropleth_yll(
             # Normalize YLL: yll_value / total_pop
             normalized_yll = safe_float(
                 yll_value / total_pop if total_pop > 0 else 0.0)
+
+            # Debug logging for problematic values
+            if math.isnan(normalized_yll) or math.isinf(normalized_yll):
+                logger.warning(
+                    f"NaN/Inf detected for county {row.fips}: yll_value={yll_value}, total_pop={total_pop}, normalized_yll={normalized_yll}")
 
             feature = {
                 "type": "Feature",
@@ -1289,6 +1303,395 @@ def get_exceedance_summary(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Health check endpoint
+
+
+@app.get("/api/download/pm25")
+def download_pm25_data(
+    time_scale: str = Query(...,
+                            description="Time scale: yearly, monthly, or seasonal"),
+    start_year: int = Query(..., ge=2006, le=2023,
+                            description="Start year (2006-2023)"),
+    end_year: int = Query(..., ge=2006, le=2023,
+                          description="End year (2006-2023)"),
+    db: Session = Depends(get_db)
+):
+    """
+    Download PM₂.₅ data as CSV for the specified time period and scale.
+    """
+    try:
+        if start_year > end_year:
+            raise HTTPException(
+                status_code=400, detail="Start year must be less than or equal to end year")
+
+        # Determine which summary table to use based on time scale
+        if time_scale == "yearly":
+            summary_table = YearlyPM25Summary
+            time_column = summary_table.year
+            group_by = [summary_table.year]
+        elif time_scale == "monthly":
+            summary_table = MonthlyPM25Summary
+            time_column = summary_table.month
+            group_by = [summary_table.year, summary_table.month]
+        elif time_scale == "seasonal":
+            summary_table = SeasonalPM25Summary
+            time_column = summary_table.season
+            group_by = [summary_table.year, summary_table.season]
+        else:
+            raise HTTPException(
+                status_code=400, detail="Invalid time scale. Use 'yearly', 'monthly', or 'seasonal'")
+
+        # Query data with county information
+        query = db.query(
+            County.fips,
+            County.name,
+            summary_table.year,
+            time_column,
+            summary_table.avg_total,
+            summary_table.avg_fire,
+            summary_table.avg_nonfire,
+            summary_table.max_total,
+            summary_table.max_fire,
+            summary_table.max_nonfire,
+            summary_table.pop_weighted_total,
+            summary_table.days_count
+        ).join(
+            summary_table, County.fips == summary_table.fips
+        ).filter(
+            summary_table.year >= start_year,
+            summary_table.year <= end_year
+        ).order_by(
+            County.fips, summary_table.year, time_column
+        )
+
+        results = query.all()
+
+        if not results:
+            raise HTTPException(
+                status_code=404, detail="No data found for the specified parameters")
+
+        # Generate CSV content
+        csv_lines = []
+
+        # CSV headers
+        if time_scale == "yearly":
+            headers = ["County_FIPS", "County_Name", "Year", "Avg_Total_PM25", "Avg_Fire_PM25", "Avg_Nonfire_PM25",
+                       "Max_Total_PM25", "Max_Fire_PM25", "Max_Nonfire_PM25", "Pop_Weighted_Total_PM25", "Days_Count"]
+        elif time_scale == "monthly":
+            headers = ["County_FIPS", "County_Name", "Year", "Month", "Avg_Total_PM25", "Avg_Fire_PM25", "Avg_Nonfire_PM25",
+                       "Max_Total_PM25", "Max_Fire_PM25", "Max_Nonfire_PM25", "Pop_Weighted_Total_PM25", "Days_Count"]
+        else:  # seasonal
+            headers = ["County_FIPS", "County_Name", "Year", "Season", "Avg_Total_PM25", "Avg_Fire_PM25", "Avg_Nonfire_PM25",
+                       "Max_Total_PM25", "Max_Fire_PM25", "Max_Nonfire_PM25", "Pop_Weighted_Total_PM25", "Days_Count"]
+
+        csv_lines.append(",".join(headers))
+
+        # CSV data rows
+        for row in results:
+            if time_scale == "yearly":
+                csv_line = [
+                    row.fips,
+                    f'"{row.name}"',  # Quote county names to handle commas
+                    str(row.year),
+                    f"{row.avg_total:.2f}" if row.avg_total is not None else "",
+                    f"{row.avg_fire:.2f}" if row.avg_fire is not None else "",
+                    f"{row.avg_nonfire:.2f}" if row.avg_nonfire is not None else "",
+                    f"{row.max_total:.2f}" if row.max_total is not None else "",
+                    f"{row.max_fire:.2f}" if row.max_fire is not None else "",
+                    f"{row.max_nonfire:.2f}" if row.max_nonfire is not None else "",
+                    f"{row.pop_weighted_total:.2f}" if row.pop_weighted_total is not None else "",
+                    str(row.days_count) if row.days_count is not None else ""
+                ]
+            elif time_scale == "monthly":
+                csv_line = [
+                    row.fips,
+                    f'"{row.name}"',
+                    str(row.year),
+                    str(row.month),
+                    f"{row.avg_total:.2f}" if row.avg_total is not None else "",
+                    f"{row.avg_fire:.2f}" if row.avg_fire is not None else "",
+                    f"{row.avg_nonfire:.2f}" if row.avg_nonfire is not None else "",
+                    f"{row.max_total:.2f}" if row.max_total is not None else "",
+                    f"{row.max_fire:.2f}" if row.max_fire is not None else "",
+                    f"{row.max_nonfire:.2f}" if row.max_nonfire is not None else "",
+                    f"{row.pop_weighted_total:.2f}" if row.pop_weighted_total is not None else "",
+                    str(row.days_count) if row.days_count is not None else ""
+                ]
+            else:  # seasonal
+                csv_line = [
+                    row.fips,
+                    f'"{row.name}"',
+                    str(row.year),
+                    str(row.season),
+                    f"{row.avg_total:.2f}" if row.avg_total is not None else "",
+                    f"{row.avg_fire:.2f}" if row.avg_fire is not None else "",
+                    f"{row.avg_nonfire:.2f}" if row.avg_nonfire is not None else "",
+                    f"{row.max_total:.2f}" if row.max_total is not None else "",
+                    f"{row.max_fire:.2f}" if row.max_fire is not None else "",
+                    f"{row.max_nonfire:.2f}" if row.max_nonfire is not None else "",
+                    f"{row.pop_weighted_total:.2f}" if row.pop_weighted_total is not None else "",
+                    str(row.days_count) if row.days_count is not None else ""
+                ]
+
+            csv_lines.append(",".join(csv_line))
+
+        csv_content = "\n".join(csv_lines)
+
+        # Return CSV response
+        filename = f"pm25_data_{time_scale}_{start_year}_{end_year}.csv"
+
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error in PM₂.₅ download endpoint: %s",
+                     str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/download/mortality")
+def download_mortality_data(
+    start_year: int = Query(..., ge=2006, le=2023,
+                            description="Start year (2006-2023)"),
+    end_year: int = Query(..., ge=2006, le=2023,
+                          description="End year (2006-2023)"),
+    age_groups: Optional[str] = Query(
+        None, description="Comma-separated age group indices (e.g., '1,2,3')"),
+    db: Session = Depends(get_db)
+):
+    """
+    Download excess mortality data as CSV for the specified time period and age groups.
+    """
+    try:
+        if start_year > end_year:
+            raise HTTPException(
+                status_code=400, detail="Start year must be less than or equal to end year")
+
+        # Parse age groups if provided
+        age_group_list = None
+        if age_groups:
+            try:
+                age_group_list = [int(ag.strip())
+                                  for ag in age_groups.split(",")]
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail="Invalid age group format. Use comma-separated integers.")
+
+        # Build query
+        query = db.query(
+            County.fips,
+            County.name,
+            ExcessMortalitySummary.year,
+            ExcessMortalitySummary.age_group,
+            ExcessMortalitySummary.population,
+            ExcessMortalitySummary.total_excess,
+            ExcessMortalitySummary.fire_excess,
+            ExcessMortalitySummary.nonfire_excess
+        ).join(
+            ExcessMortalitySummary, County.fips == ExcessMortalitySummary.fips
+        ).filter(
+            ExcessMortalitySummary.year >= start_year,
+            ExcessMortalitySummary.year <= end_year
+        )
+
+        # Filter by age groups if specified
+        if age_group_list:
+            query = query.filter(
+                ExcessMortalitySummary.age_group.in_(age_group_list))
+
+        # Order results
+        query = query.order_by(
+            County.fips, ExcessMortalitySummary.year, ExcessMortalitySummary.age_group)
+
+        results = query.all()
+
+        if not results:
+            raise HTTPException(
+                status_code=404, detail="No data found for the specified parameters")
+
+        # Generate CSV content
+        csv_lines = []
+
+        # CSV headers
+        headers = ["County_FIPS", "County_Name", "Year", "Age_Group", "Population", "Total_Excess_Mortality",
+                   "Fire_Excess_Mortality", "Nonfire_Excess_Mortality"]
+        csv_lines.append(",".join(headers))
+
+        # Age group mapping for readable output
+        age_group_names = {
+            1: "0-4", 2: "5-9", 3: "10-14", 4: "15-19", 5: "20-24", 6: "25-29", 7: "30-34", 8: "35-39",
+            9: "40-44", 10: "45-49", 11: "50-54", 12: "55-59", 13: "60-64", 14: "65-69", 15: "70-74",
+            16: "75-79", 17: "80-84", 18: "85+"
+        }
+
+        # CSV data rows
+        for row in results:
+            age_group_name = age_group_names.get(
+                row.age_group, f"Group_{row.age_group}")
+
+            csv_line = [
+                row.fips,
+                f'"{row.name}"',  # Quote county names to handle commas
+                str(row.year),
+                age_group_name,
+                str(row.population) if row.population is not None else "",
+                f"{row.total_excess:.3f}" if row.total_excess is not None else "",
+                f"{row.fire_excess:.3f}" if row.fire_excess is not None else "",
+                f"{row.nonfire_excess:.3f}" if row.nonfire_excess is not None else ""
+            ]
+
+            csv_lines.append(",".join(csv_line))
+
+        csv_content = "\n".join(csv_lines)
+
+        # Return CSV response
+        filename = f"mortality_data_{start_year}_{end_year}.csv"
+
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error in mortality download endpoint: %s",
+                     str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/download/yll")
+def download_yll_data(
+    start_year: int = Query(..., ge=2006, le=2023,
+                            description="Start year (2006-2023)"),
+    end_year: int = Query(..., ge=2006, le=2023,
+                          description="End year (2006-2023)"),
+    age_groups: Optional[str] = Query(
+        None, description="Comma-separated age group indices (e.g., '1,2,3')"),
+    db: Session = Depends(get_db)
+):
+    """
+    Download Years of Life Lost (YLL) data as CSV for the specified time period and age groups.
+    """
+    try:
+        if start_year > end_year:
+            raise HTTPException(
+                status_code=400, detail="Start year must be less than or equal to end year")
+
+        # Parse age groups if provided
+        age_group_list = None
+        if age_groups:
+            try:
+                age_group_list = [int(ag.strip())
+                                  for ag in age_groups.split(",")]
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail="Invalid age group format. Use comma-separated integers.")
+
+        # Build query - we'll calculate YLL from excess mortality and life expectancy
+        query = db.query(
+            County.fips,
+            County.name,
+            ExcessMortalitySummary.year,
+            ExcessMortalitySummary.age_group,
+            ExcessMortalitySummary.population,
+            ExcessMortalitySummary.total_excess,
+            ExcessMortalitySummary.fire_excess,
+            ExcessMortalitySummary.nonfire_excess
+        ).join(
+            ExcessMortalitySummary, County.fips == ExcessMortalitySummary.fips
+        ).filter(
+            ExcessMortalitySummary.year >= start_year,
+            ExcessMortalitySummary.year <= end_year
+        )
+
+        # Filter by age groups if specified
+        if age_group_list:
+            query = query.filter(
+                ExcessMortalitySummary.age_group.in_(age_group_list))
+
+        # Order results
+        query = query.order_by(
+            County.fips, ExcessMortalitySummary.year, ExcessMortalitySummary.age_group)
+
+        results = query.all()
+
+        if not results:
+            raise HTTPException(
+                status_code=404, detail="No data found for the specified parameters")
+
+        # Generate CSV content
+        csv_lines = []
+
+        # CSV headers
+        headers = ["County_FIPS", "County_Name", "Year", "Age_Group", "Population",
+                   "Total_YLL", "Fire_YLL", "Nonfire_YLL", "Life_Expectancy"]
+        csv_lines.append(",".join(headers))
+
+        # Age group mapping and life expectancy estimates
+        age_group_names = {
+            1: "0-4", 2: "5-9", 3: "10-14", 4: "15-19", 5: "20-24", 6: "25-29", 7: "30-34", 8: "35-39",
+            9: "40-44", 10: "45-49", 11: "50-54", 12: "55-59", 13: "60-64", 14: "65-69", 15: "70-74",
+            16: "75-79", 17: "80-84", 18: "85+"
+        }
+
+        # Approximate life expectancy by age group (US averages)
+        life_expectancy_by_age = {
+            1: 80.0, 2: 75.0, 3: 70.0, 4: 65.0, 5: 60.0, 6: 55.0, 7: 50.0, 8: 45.0,
+            9: 40.0, 10: 35.0, 11: 30.0, 12: 25.0, 13: 20.0, 14: 15.0, 15: 10.0, 16: 7.0,
+            17: 5.0, 18: 3.0
+        }
+
+        # CSV data rows
+        for row in results:
+            age_group_name = age_group_names.get(
+                row.age_group, f"Group_{row.age_group}")
+            life_expectancy = life_expectancy_by_age.get(row.age_group, 10.0)
+
+            # Calculate YLL (Years of Life Lost)
+            total_yll = (
+                row.total_excess * life_expectancy) if row.total_excess is not None else 0.0
+            fire_yll = (row.fire_excess *
+                        life_expectancy) if row.fire_excess is not None else 0.0
+            nonfire_yll = (
+                row.nonfire_excess * life_expectancy) if row.nonfire_excess is not None else 0.0
+
+            csv_line = [
+                row.fips,
+                f'"{row.name}"',  # Quote county names to handle commas
+                str(row.year),
+                age_group_name,
+                str(row.population) if row.population is not None else "",
+                f"{total_yll:.1f}" if total_yll is not None else "",
+                f"{fire_yll:.1f}" if fire_yll is not None else "",
+                f"{nonfire_yll:.1f}" if nonfire_yll is not None else "",
+                f"{life_expectancy:.1f}"
+            ]
+
+            csv_lines.append(",".join(csv_line))
+
+        csv_content = "\n".join(csv_lines)
+
+        # Return CSV response
+        filename = f"yll_data_{start_year}_{end_year}.csv"
+
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error in YLL download endpoint: %s",
+                     str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/health")

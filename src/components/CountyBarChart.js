@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, LabelList, Rectangle, PieChart, Pie, Cell } from "recharts";
 import { pm25ToAqiInfo } from '../utils/aqi';
 
@@ -27,7 +27,7 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-function CountyBarChartContent({ data, timeScale, zoomed }) {
+function CountyBarChartContent({ data, timeScale, zoomed, containerWidth }) {
   // Ensure data is properly formatted
   const formattedData = data.map(item => {
     const nonFireValue = item.nonFire !== undefined ? item.nonFire : item.nonfire;
@@ -36,6 +36,7 @@ function CountyBarChartContent({ data, timeScale, zoomed }) {
     const totalPM25 = fireValue + nonFireValueNum;
     return { ...item, fire: fireValue, nonFire: nonFireValueNum, total: totalPM25 };
   });
+
   const filteredData = formattedData
     .filter(d => Number.isFinite(d.fire) && Number.isFinite(d.nonFire) && (d.label || d.timePeriod))
     .sort((a, b) => {
@@ -56,21 +57,24 @@ function CountyBarChartContent({ data, timeScale, zoomed }) {
       }
       return new Date(a.date) - new Date(b.date);
     });
+
   const chartData = JSON.parse(JSON.stringify(filteredData));
   const maxValue = Math.max(12, ...chartData.map(d => d.fire + d.nonFire));
   const tickStep = Math.max(1, Math.ceil(maxValue / 6));
   const ticks = [];
   for (let t = 0; t <= maxValue; t += tickStep) ticks.push(t);
-  const containerWidth = 420;
+
+  // Define chart dimensions and daily chart flag
   const isDailyChart = timeScale === 'monthly' || timeScale === 'seasonal';
-  const chartWidth = zoomed ? 700 : (timeScale === 'yearly' ? 350 : Math.max(350, chartData.length * 8));
-  const chartHeight = zoomed ? 350 : 180;
+
+  const chartHeight = zoomed ? 350 : 200;
   const pieWidth = zoomed ? 350 : 200;
   const pieHeight = zoomed ? 260 : 160;
+
   const barSize = timeScale === 'yearly' ? 20 :
-    timeScale === 'monthly' ? Math.max(8, Math.min(15, 250 / chartData.length)) :
-      timeScale === 'seasonal' ? 6 :
-        Math.max(6, Math.min(18, Math.floor(containerWidth / chartData.length) - 1));
+    timeScale === 'monthly' ? Math.max(10, Math.min(20, 300 / chartData.length)) :
+      timeScale === 'seasonal' ? 8 :
+        Math.max(8, Math.min(25, Math.floor(containerWidth / chartData.length) - 2));
 
   // Improved x-axis label logic to prevent overlap
   const formatXAxis = (tickItem, index) => {
@@ -139,7 +143,7 @@ function CountyBarChartContent({ data, timeScale, zoomed }) {
       const date = new Date(data.date);
       dateLabel = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
-    if (isDailyChart) {
+    if (timeScale === 'daily') {
       const total = typeof payload[0].value === 'number' ? payload[0].value : data.total;
       const fire = typeof data.fire === 'number' ? data.fire : 0;
       const nonFire = typeof data.nonFire === 'number' ? data.nonFire : 0;
@@ -197,10 +201,10 @@ function CountyBarChartContent({ data, timeScale, zoomed }) {
     <>
       <div style={{ width: '100%' }}>
         <BarChart
-          width={chartWidth}
+          width={containerWidth}
           height={chartHeight}
           data={chartData}
-          margin={{ top: 20, right: 60, left: 5, bottom: 0 }}
+          margin={{ top: 3, right: 50, left: 3, bottom: 3 }}
           barSize={barSize}
           barCategoryGap={timeScale === 'seasonal' ? 2 : undefined}
         >
@@ -210,13 +214,13 @@ function CountyBarChartContent({ data, timeScale, zoomed }) {
             tickFormatter={formatXAxis}
             interval={0}
             tick={{ fontSize: 9 }}
-            height={30}
+            height={25}
           />
           <YAxis
             domain={[0, maxValue]}
             ticks={ticks}
             tick={{ fontSize: 9 }}
-            width={35}
+            width={30}
             label={{
               value: 'PM2.5 (µg/m³)',
               angle: -90,
@@ -339,31 +343,31 @@ function CountyBarChartContent({ data, timeScale, zoomed }) {
       </div>
       {/* AQI Legend for daily charts */}
       {isDailyChart && (
-        <div style={{ width: '100%', margin: '4px 0 0 0', display: 'block', overflowX: 'auto', whiteSpace: 'nowrap' }}>
-          <div style={{ display: 'flex', flexWrap: 'nowrap', gap: 8, margin: 0, padding: 0, justifyContent: 'flex-start', minWidth: 'max-content' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflow: 'visible' }}>
+        <div className="chart-legend-container">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: 0, padding: 0, justifyContent: 'flex-start' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
               <span style={{ width: 14, height: 14, background: '#00e400', borderRadius: 3, display: 'inline-block', marginRight: 1, border: '1px solid #bbb', flex: '0 0 auto' }}></span>
-              <span style={{ fontSize: 8, color: '#000', whiteSpace: 'nowrap' }}>Good</span>
+              <span style={{ fontSize: 8, color: '#000' }}>Good</span>
             </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflow: 'visible' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
               <span style={{ width: 14, height: 14, background: '#ffff00', borderRadius: 3, display: 'inline-block', marginRight: 1, border: '1px solid #bbb', flex: '0 0 auto' }}></span>
-              <span style={{ fontSize: 8, color: '#000', whiteSpace: 'nowrap' }}>Moderate</span>
+              <span style={{ fontSize: 8, color: '#000' }}>Moderate</span>
             </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflow: 'visible' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
               <span style={{ width: 14, height: 14, background: '#ff7e00', borderRadius: 3, display: 'inline-block', marginRight: 1, border: '1px solid #bbb', flex: '0 0 auto' }}></span>
-              <span style={{ fontSize: 8, color: '#000', whiteSpace: 'nowrap' }}>Unhealthy for SG</span>
+              <span style={{ fontSize: 8, color: '#000' }}>Unhealthy for SG</span>
             </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflow: 'visible' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
               <span style={{ width: 14, height: 14, background: '#ff0000', borderRadius: 3, display: 'inline-block', marginRight: 1, border: '1px solid #bbb', flex: '0 0 auto' }}></span>
-              <span style={{ fontSize: 8, color: '#000', whiteSpace: 'nowrap' }}>Unhealthy</span>
+              <span style={{ fontSize: 8, color: '#000' }}>Unhealthy</span>
             </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflow: 'visible' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
               <span style={{ width: 14, height: 14, background: '#8f3f97', borderRadius: 3, display: 'inline-block', marginRight: 1, border: '1px solid #bbb', flex: '0 0 auto' }}></span>
-              <span style={{ fontSize: 8, color: '#000', whiteSpace: 'nowrap' }}>Very Unhealthy</span>
+              <span style={{ fontSize: 8, color: '#000' }}>Very Unhealthy</span>
             </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflow: 'visible' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
               <span style={{ width: 14, height: 14, background: '#7e0023', borderRadius: 3, display: 'inline-block', marginRight: 1, border: '1px solid #bbb', flex: '0 0 auto' }}></span>
-              <span style={{ fontSize: 8, color: '#000', whiteSpace: 'nowrap' }}>Hazardous</span>
+              <span style={{ fontSize: 8, color: '#000' }}>Hazardous</span>
             </span>
           </div>
         </div>
@@ -372,10 +376,10 @@ function CountyBarChartContent({ data, timeScale, zoomed }) {
       {isDailyChart && pieData && (
         <>
           <div style={{ fontSize: zoomed ? 22 : 16, margin: zoomed ? '24px 0 12px 0' : '16px 0 8px 0', textAlign: 'left', fontWeight: 600, width: '100%' }}>
-            <span style={{ color: '#ffb74d', fontWeight: 700 }}>Fire</span> vs <span style={{ color: '#1976d2', fontWeight: 700 }}>Non-Fire</span> PM2.5
+            <span style={{ color: '#ffb74d', fontWeight: 700 }}>Fire</span> vs <span style={{ color: '#90caf9', fontWeight: 700 }}>Non-Fire</span> PM2.5
           </div>
           <div style={{ width: '100%', margin: '0 auto', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'visible' }}>
-            <PieChart width={zoomed ? pieWidth : Math.min(220, window.innerWidth * 0.9)} height={zoomed ? pieHeight : 160} style={{ width: '100%', height: zoomed ? pieHeight : 160, maxWidth: zoomed ? 350 : 220, margin: '0 auto', overflow: 'visible' }}>
+            <PieChart width={pieWidth} height={pieHeight} style={{ width: '100%', height: pieHeight, maxWidth: zoomed ? 350 : 220, margin: '0 auto', overflow: 'visible' }}>
               <Pie
                 data={pieData}
                 dataKey="value"
@@ -398,65 +402,65 @@ function CountyBarChartContent({ data, timeScale, zoomed }) {
   );
 }
 
-export default function CountyBarChart({ data, timeScale }) {
-  const [zoomed, setZoomed] = useState(false);
+export default function CountyBarChart({ data, timeScale, containerWidth = 420, onExpand, isExpanded = false }) {
+  const [zoomed, setZoomed] = useState(isExpanded);
+
+  // Update zoomed state when isExpanded prop changes
+  useEffect(() => {
+    setZoomed(isExpanded);
+  }, [isExpanded]);
+
+  // Calculate responsive dimensions based on container width
+  const chartWidth = zoomed ? 760 : Math.min(containerWidth - 10, containerWidth); // Use almost full width
+  const chartHeight = zoomed ? 350 : 200; // Slightly reduced height
+
+  // Handle expand button click
+  const handleExpand = () => {
+    setZoomed(true);
+    if (onExpand) onExpand();
+  };
+
   return (
     <div
       style={{
-        width: zoomed ? 760 : 420,
+        width: '100%',
+        maxWidth: Math.min(containerWidth - 10, containerWidth),
         boxSizing: 'border-box',
         overflowX:
-          timeScale !== 'yearly' && (zoomed ? 700 : Math.max(350, data.length * 8)) > 420
+          timeScale !== 'yearly' && Math.max(350, data.length * 8) > Math.min(containerWidth - 10, containerWidth)
             ? 'auto'
             : 'visible',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         gap: 0,
-        background: zoomed ? '#fff' : undefined,
-        borderRadius: zoomed ? 8 : undefined,
-        boxShadow: zoomed ? '0 4px 24px 0 rgba(30,34,90,0.10)' : undefined,
-        zIndex: zoomed ? 1001 : undefined
+        background: undefined,
+        borderRadius: undefined,
+        boxShadow: undefined,
+        zIndex: undefined
       }}
     >
       {/* Chart box with relative positioning for the zoom button */}
-      <div style={{ width: '100%', position: 'relative', background: '#f7f8fa', borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.04)', padding: zoomed ? 24 : 12, marginBottom: 0, maxWidth: '100%', minWidth: 0, overflow: 'hidden' }}>
-        {/* Zoom button - only show when not zoomed */}
-        {!zoomed && (
-          <button
-            onClick={() => setZoomed(true)}
-            title="Zoom in"
-            style={{
-              position: 'absolute',
-              top: 4,
-              right: 4,
-              background: '#fff',
-              border: '1px solid #bbb',
-              borderRadius: '50%',
-              width: 32,
-              height: 32,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              zIndex: 2,
-              boxShadow: '0 1px 4px rgba(0,0,0,0.07)',
-              transition: 'box-shadow 0.15s',
-              padding: 0
-            }}
-            onMouseOver={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)'}
-            onMouseOut={e => e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.07)'}
-          >
-            {/* Magnifying glass SVG */}
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="9" cy="9" r="7" stroke="#333" strokeWidth="2" />
-              <line x1="14.2" y1="14.2" x2="18" y2="18" stroke="#333" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </button>
-        )}
+      <div style={{
+        width: 'fit-content',
+        maxWidth: '100%',
+        position: 'relative',
+        background: '#f7f8fa',
+        borderRadius: 8,
+        boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+        padding: 12,
+        marginBottom: 0,
+        minWidth: 0,
+        overflow: 'hidden'
+      }}>
         {/* Main chart content with horizontal scroll for bar chart */}
         <div style={{ width: '100%', minWidth: 0, overflowX: 'auto' }}>
-          <CountyBarChartContent data={data} timeScale={timeScale} zoomed={false} />
+          <CountyBarChartContent
+            data={data}
+            timeScale={timeScale}
+            zoomed={false}
+            containerWidth={containerWidth}
+          />
         </div>
       </div>
       {/* Modal overlay for zoomed chart */}
@@ -492,7 +496,10 @@ export default function CountyBarChart({ data, timeScale }) {
             }}
           >
             <button
-              onClick={() => setZoomed(false)}
+              onClick={() => {
+                setZoomed(false);
+                if (onExpand) onExpand(); // Notify parent that chart is closed
+              }}
               title="Close"
               style={{
                 position: 'absolute',
@@ -509,7 +516,7 @@ export default function CountyBarChart({ data, timeScale }) {
               ×
             </button>
             {/* Render only the chart content, not another zoom button/modal */}
-            <CountyBarChartContent data={data} timeScale={timeScale} zoomed={true} />
+            <CountyBarChartContent data={data} timeScale={timeScale} zoomed={true} containerWidth={chartWidth} />
           </div>
         </div>
       )}

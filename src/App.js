@@ -45,6 +45,7 @@ function App() {
   const [lastHoveredCounty, setLastHoveredCounty] = useState(null); // Store last full hover data
   const [loading, setLoading] = useState(false);
   const [mapRefreshKey, setMapRefreshKey] = useState(0); // triggers map data refresh
+  const [sidebarWidth, setSidebarWidth] = useState(400); // Track sidebar width for map adjustment
 
   const [selectedAgeGroups, setSelectedAgeGroups] = useState(AGE_GROUPS.map(g => g.value)); // default to all
   const [openLanding, setOpenLanding] = useState(true); // modal opens on first load
@@ -103,6 +104,11 @@ function App() {
   };
   const handleSetMortalitySubMetric = (subMetric) => {
     setMortalitySubMetric(subMetric);
+  };
+
+  // Handler for sidebar width changes
+  const handleSidebarWidthChange = (newWidth) => {
+    setSidebarWidth(newWidth);
   };
 
   // Fetch bar chart data for selected county
@@ -180,7 +186,7 @@ function App() {
       <CssBaseline />
       {/* Landing Modal */}
       <Dialog open={openLanding} onClose={() => setOpenLanding(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>
+        <DialogTitle component="div">
           <Typography
             variant="h5"
             align="center"
@@ -192,13 +198,8 @@ function App() {
           </Typography>
         </DialogTitle>
         <DialogContent>
-          <Typography textAlign="center" variant="body1" sx={{ mb: 2 }}>
+          <Typography textAlign="center" variant="body1" >
             Welcome! This tool allows you to explore the impact of PM2.5 pollution from wildfires across the United States using interactive maps and charts.
-          </Typography>
-        </DialogContent>
-        <DialogContent>
-          <Typography textAlign="center" variant="body2" color="text.secondary" gutterBottom>
-            <b>Data Sources:</b> Data is sourced from public datasets including ____, and US Census.
           </Typography>
         </DialogContent>
         <DialogContent>
@@ -235,6 +236,7 @@ function App() {
               onMapLoaded={handleMapLoaded}
               selectedCounty={selectedCounty}
               selectedAgeGroups={selectedAgeGroups}
+              sidebarWidth={sidebarWidth}
             />
           </Box>
           {/* Sidebar */}
@@ -253,12 +255,13 @@ function App() {
             setSelectedAgeGroups={setSelectedAgeGroups}
             mortalitySubMetric={mortalitySubMetric}
             setMortalitySubMetric={setMortalitySubMetric}
+            onWidthChange={handleSidebarWidthChange}
           />
         </Box>
       )}
 
-      {activeTab === 'about' && <About />}
-      {activeTab === 'partners' && <Partners />}
+      {activeTab === 'about' && <About onTabChange={handleTabChange} />}
+      {activeTab === 'partners' && <Partners onTabChange={handleTabChange} />}
       {activeTab === 'methodology' && <Methodology />}
     </>
   );

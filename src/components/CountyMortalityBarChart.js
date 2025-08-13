@@ -6,7 +6,7 @@ const COLORS = {
     fire: "#ffb74d",    // orange
 };
 
-export default function CountyMortalityBarChart({ data, timeScale = 'yearly', yllMode = false }) {
+export default function CountyMortalityBarChart({ data, timeScale = 'yearly', yllMode = false, containerWidth = 420 }) {
     // Format data
     const formattedData = data.map(item => {
         // Use YLL values if yllMode, otherwise deaths
@@ -28,6 +28,10 @@ export default function CountyMortalityBarChart({ data, timeScale = 'yearly', yl
     const ticks = [];
     for (let t = 0; t <= maxValue; t += tickStep) ticks.push(t);
 
+    // Calculate responsive dimensions
+    const chartWidth = Math.min(containerWidth - 20, 350); // Leave 20px padding
+    const chartHeight = 180;
+
     // Tooltip
     const CustomTooltip = ({ active, payload, label }) => {
         if (active && payload && payload.length) {
@@ -45,10 +49,10 @@ export default function CountyMortalityBarChart({ data, timeScale = 'yearly', yl
     };
 
     return (
-        <div style={{ width: 420, boxSizing: 'border-box' }}>
+        <div style={{ width: '100%', maxWidth: containerWidth, boxSizing: 'border-box' }}>
             <BarChart
-                width={350}
-                height={180}
+                width={chartWidth}
+                height={chartHeight}
                 data={chartData}
                 margin={{ top: 20, right: 60, left: 5, bottom: 0 }}
                 barSize={20}
