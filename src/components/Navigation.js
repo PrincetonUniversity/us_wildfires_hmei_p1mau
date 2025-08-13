@@ -8,7 +8,12 @@ function Navigation({ activeTab, onTabChange }) {
 
     return (
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-            <Typography variant="h4" component="h1" sx={{ fontWeight: 'normal', flexGrow: 1, fontFamily: 'Roboto, sans-serif', color: '#333', fontSize: '1.6rem', padding: '8px 0' }}>
+            <img
+                src="/PU_lockup.png"
+                alt="App Logo"
+                className="app-logo"
+            />
+            <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', flex: 1, textAlign: 'center' }}>
                 PM2.5 Wildfire Impact Map
             </Typography>
             <Tabs
@@ -26,6 +31,7 @@ function Navigation({ activeTab, onTabChange }) {
                         '&.Mui-selected': {
                             color: '#333',
                             fontWeight: 600,
+                            backgroundColor: 'transparent',
                         },
                         '&:hover': {
                             color: '#333',
@@ -42,7 +48,7 @@ function Navigation({ activeTab, onTabChange }) {
                 <Tab label="Map" value="map" />
                 <Tab label="About" value="about" />
                 <Tab label="Partners" value="partners" />
-                <Tab label="Methodology" value="methodology" />
+                <Tab label="Data & Methodology" value="methodology" />
             </Tabs>
         </Box>
     );
