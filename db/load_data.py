@@ -67,7 +67,7 @@ class DataLoader:
     def load_shapefiles(self, shapefile_path: Optional[str] = None):
         """Load county geometries from shapefile"""
         if shapefile_path is None:
-            shapefile_path = "data/shapefiles/county/cb_2024_us_county_5m.shp"
+            shapefile_path = "data/shapefiles/county/cb_2018_us_county_5m.shp"
 
         logger.info(f"Loading county geometries from {shapefile_path}")
 
@@ -139,7 +139,7 @@ class DataLoader:
         if fips_filepath is None:
             fips_filepath = self.data_dir / "FIPScode.csv"
         if shapefile_path is None:
-            shapefile_path = "data/shapefiles/county/cb_2024_us_county_5m.shp"
+            shapefile_path = "data/shapefiles/county/cb_2018_us_county_5m.shp"
 
         logger.info(f"Loading counties from {fips_filepath}")
 

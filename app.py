@@ -58,7 +58,7 @@ def load_county_geometries():
     if COUNTY_GEOMETRIES is None:
         try:
             # Path to the county boundaries shapefile
-            shapefile_path = "data/shapefiles/county/cb_2024_us_county_5m.shp"
+            shapefile_path = "data/shapefiles/county/cb_2018_us_county_5m.shp"
 
             # Read the shapefile
             gdf = gpd.read_file(shapefile_path)
@@ -202,7 +202,7 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
             raise HTTPException(
                 status_code=400, detail="Year required for yearly data")
         query = db.query(
-            summary_model.fips,
+            County.fips,
             County.name.label("county_name"),
             County.geometry,
             summary_model.avg_total,
@@ -215,16 +215,18 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
             summary_model.pop_weighted_fire,
             summary_model.pop_weighted_nonfire,
             Population.population
-        ).join(
-            County, County.fips == summary_model.fips
+        ).outerjoin(
+            summary_model, and_(
+                summary_model.fips == County.fips,
+                summary_model.year == year
+            )
         ).outerjoin(
             Population, and_(
-                Population.fips == summary_model.fips,
+                Population.fips == County.fips,
                 Population.year == year,
                 Population.age_group == 0
             )
         ).filter(
-            summary_model.year == year,
             ~County.fips.startswith('72')
         )
     elif time_scale == "monthly":
@@ -232,7 +234,7 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
             raise HTTPException(
                 status_code=400, detail="Year and month required for monthly data")
         query = db.query(
-            summary_model.fips,
+            County.fips,
             County.name.label("county_name"),
             County.geometry,
             summary_model.avg_total,
@@ -245,17 +247,19 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
             summary_model.pop_weighted_fire,
             summary_model.pop_weighted_nonfire,
             Population.population
-        ).join(
-            County, County.fips == summary_model.fips
+        ).outerjoin(
+            summary_model, and_(
+                summary_model.fips == County.fips,
+                summary_model.year == year,
+                summary_model.month == month
+            )
         ).outerjoin(
             Population, and_(
-                Population.fips == summary_model.fips,
+                Population.fips == County.fips,
                 Population.year == year,
                 Population.age_group == 0
             )
         ).filter(
-            summary_model.year == year,
-            summary_model.month == month,
             ~County.fips.startswith('72')
         )
     elif time_scale == "seasonal":
@@ -263,7 +267,7 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
             raise HTTPException(
                 status_code=400, detail="Year and season required for seasonal data")
         query = db.query(
-            summary_model.fips,
+            County.fips,
             County.name.label("county_name"),
             County.geometry,
             summary_model.avg_total,
@@ -276,17 +280,19 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
             summary_model.pop_weighted_fire,
             summary_model.pop_weighted_nonfire,
             Population.population
-        ).join(
-            County, County.fips == summary_model.fips
+        ).outerjoin(
+            summary_model, and_(
+                summary_model.fips == County.fips,
+                summary_model.year == year,
+                summary_model.season == season.lower()
+            )
         ).outerjoin(
             Population, and_(
-                Population.fips == summary_model.fips,
+                Population.fips == County.fips,
                 Population.year == year,
                 Population.age_group == 0
             )
         ).filter(
-            summary_model.year == year,
-            summary_model.season == season.lower(),
             ~County.fips.startswith('72')
         )
     else:
