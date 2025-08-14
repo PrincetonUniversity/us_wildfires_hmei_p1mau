@@ -1,0 +1,47 @@
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    unzip \
+    libgdal-dev \
+    gdal-bin \
+    libproj-dev \
+    proj-data \
+    proj-bin \
+    libgeos-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY app.py .
+COPY db/ ./db/
+COPY __init__.py .
+COPY startup.sh .
+COPY data.zip .
+
+# Verify data.zip was copied correctly
+RUN echo "Verifying data.zip..." && \
+    ls -lh data.zip && \
+    file data.zip
+
+# Create data directory (will be mounted as volume)
+RUN mkdir -p /app/data
+
+# Make startup script executable
+RUN chmod +x /app/startup.sh
+
+# Expose port
+EXPOSE 8000
+
+# Use startup script as entrypoint
+CMD ["/app/startup.sh"]

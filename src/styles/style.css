@@ -1,0 +1,312 @@
+:root {
+    --background: #f7f8fa;
+    --sidebar-bg: #fff;
+    --sidebar-shadow: 0 2px 12px rgba(0, 0, 0, 0.07);
+    --card-bg: #fff;
+    --card-border: #e0e4ea;
+    --text: #222;
+    --accent: #e9ae40;
+    --accent-hover: #be8a29;
+    --primary: #e9ae40;
+    --secondary: #dc004e;
+    --health-red: #dc004e;
+    --old-blue: #1976d2;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+    background: var(--background);
+    color: var(--text);
+    font-size: 16px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.container {
+    display: flex;
+    min-height: 100vh;
+    background: var(--background);
+}
+
+.sidebar {
+    width: 320px;
+    background: var(--sidebar-bg);
+    box-shadow: var(--sidebar-shadow);
+    border-radius: 0 12px 12px 0;
+    padding: 28px 24px 24px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+#map {
+    flex: 1;
+    height: 100%;
+}
+
+h1 {
+    color: var(--accent);
+    margin-bottom: 18px;
+    font-size: 1.7em;
+    font-weight: 700;
+    letter-spacing: -1px;
+}
+
+.controls {
+    margin-bottom: 18px;
+    display: flex;
+    gap: 10px;
+}
+
+select,
+button {
+    padding: 9px 16px;
+    border-radius: 5px;
+    border: 1px solid #ddd;
+    font-size: 1em;
+    background: #f7f8fa;
+    color: var(--text);
+    transition: background 0.2s, color 0.2s, border 0.2s;
+}
+
+button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+button:hover,
+button:focus {
+    background: var(--accent-hover);
+    outline: none;
+}
+
+select:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+.card,
+.legend {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
+    padding: 18px;
+    margin-bottom: 16px;
+    transition: background 0.2s, color 0.2s, border 0.2s;
+}
+
+.color-scale {
+    height: 20px;
+    background: linear-gradient(to right, #00e400, #ffff00, #ff0000);
+    margin-top: 10px;
+    border-radius: 4px;
+}
+
+/* App header styles */
+.app-header {
+    background: #D3DDDE !important;
+    color: #333 !important;
+    padding: 8px 16px !important;
+    box-shadow: 0 2px 8px rgba(255, 212, 140, 0.3);
+    width: 100%;
+    margin-bottom: 0;
+}
+
+/* Header title styles */
+.app-header .MuiTypography-h4,
+.app-header .MuiTypography-root[component="h1"] {
+    color: #333 !important;
+    font-size: 1.6rem !important;
+    font-weight: bold !important;
+    font-family: 'Roboto', sans-serif !important;
+    letter-spacing: -1px;
+    margin: 0 !important;
+    margin-left: 1px;
+    text-align: center;
+    padding: 8px 0 !important;
+}
+
+/* Navigation tabs styles */
+.app-header .MuiTabs-root {
+    margin-left: auto;
+}
+
+.app-header .MuiTab-root {
+    color: rgba(0, 0, 0, 0.7) !important;
+    font-weight: 500 !important;
+    font-size: 0.9rem !important;
+    font-family: 'Roboto', sans-serif !important;
+    text-transform: none !important;
+    min-width: auto !important;
+    padding: 6px 16px !important;
+}
+
+.app-header .MuiTab-root.Mui-selected {
+    color: #333 !important;
+    font-weight: 600 !important;
+    background-color: transparent !important;
+}
+
+.app-header .MuiTab-root:hover {
+    color: #333 !important;
+    background-color: rgba(255, 255, 255, 0.6) !important;
+    border-radius: 4px !important;
+}
+
+.app-header .MuiTabs-indicator {
+    background-color: #333 !important;
+    height: 3px !important;
+}
+
+/* Page title styles */
+.page-title {
+    font-weight: bold !important;
+    color: #333 !important;
+}
+
+/* Partner card title styles */
+.partner-card-title {
+    font-weight: 600 !important;
+    color: var(--primary) !important;
+}
+
+/* Threshold category styles */
+.threshold-category {
+    color: var(--primary) !important;
+}
+
+/* Chart legend styles */
+.chart-legend-nonfire {
+    color: var(--primary) !important;
+    font-weight: 700 !important;
+}
+
+/* Health metrics button styles */
+.health-metric-active {
+    background-color: #dc004e !important;
+    color: white !important;
+    border-color: #dc004e !important;
+}
+
+.health-metric-inactive {
+    background-color: white !important;
+    color: #dc004e !important;
+    border-color: #dc004e !important;
+}
+
+.health-metric-active:hover {
+    background-color: #a7003a !important;
+    color: white !important;
+}
+
+.health-metric-inactive:hover {
+    background-color: #ff6b9d !important;
+    color: white !important;
+}
+
+/* Exceedance metrics button styles */
+.exceedance-active {
+    background-color: #4dd0e1 !important;
+    color: white !important;
+    border-color: #00838f !important;
+}
+
+.exceedance-inactive {
+    background-color: white !important;
+    color: #00838f !important;
+    border-color: #00838f !important;
+}
+
+.exceedance-active:hover {
+    background-color: #00838f !important;
+    color: white !important;
+}
+
+.exceedance-inactive:hover {
+    background-color: #b2ebf2 !important;
+    color: white !important;
+}
+
+/* App logo styles */
+.app-logo {
+    height: 40px;
+    width: auto;
+    margin-right: 12px;
+    border-radius: 4px;
+}
+
+/* Ensure Container doesn't shrink the header */
+.MuiContainer-root {
+    width: 100% !important;
+    max-width: 100vw !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+}
+
+/* Responsive chart styles */
+.chart-container {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.chart-container svg {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Ensure charts don't overflow their containers */
+.recharts-wrapper {
+    max-width: 100% !important;
+}
+
+.recharts-surface {
+    max-width: 100% !important;
+}
+
+/* Responsive sidebar content */
+.sidebar-content {
+    width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+}
+
+/* Chart overflow handling */
+.chart-overflow-container {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+
+.chart-overflow-container::-webkit-scrollbar {
+    height: 6px;
+}
+
+.chart-overflow-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+
+.chart-overflow-container::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 3px;
+}
+
+.chart-overflow-container::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* Fix AQI labels overflow */
+.chart-legend-container {
+    width: 100%;
+    overflow-x: visible;
+    overflow-y: visible;
+    padding: 4px 0;
+}
