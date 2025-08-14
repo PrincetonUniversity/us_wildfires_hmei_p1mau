@@ -20,7 +20,7 @@ const pillStyle = {
 };
 
 const PM25_LAYERS = ['average', 'max', 'pop_weighted'];
-const HEALTH_LAYERS = ['mortality', 'population'];
+const HEALTH_LAYERS = ['mortality', 'yll', 'population'];
 
 const LayerTimeControls = ({
     activeLayer,

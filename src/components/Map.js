@@ -266,7 +266,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
           params.append('year', year.toString());
           params.append('sub_metric', subMetric);
           if (selectedAgeGroups && selectedAgeGroups.length > 0) {
-            params.append('age_groups', selectedAgeGroups.join(','));
+            params.append('age_group', selectedAgeGroups.join(','));
           }
           url = `${API_BASE_URL}${endpoint}?${params}`;
         } else if (activeLayer === 'yll') {
@@ -274,7 +274,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
           params.append('year', year.toString());
           params.append('sub_metric', subMetric);
           if (selectedAgeGroups && selectedAgeGroups.length > 0) {
-            params.append('age_groups', selectedAgeGroups.join(','));
+            params.append('age_group', selectedAgeGroups.join(','));
           }
           url = `${API_BASE_URL}${endpoint}?${params}`;
         } else if (activeLayer === 'population') {

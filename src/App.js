@@ -11,7 +11,7 @@ import { apiCall } from './utils/api';
 import './styles/style.css';
 
 const PM25_LAYERS = ['average', 'max', 'pop_weighted'];
-const HEALTH_LAYERS = ['mortality', 'population'];
+const HEALTH_LAYERS = ['mortality', 'yll', 'population'];
 
 const AGE_GROUPS = [
   { value: 1, label: '0-4' },

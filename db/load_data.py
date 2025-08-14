@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 
 import geopandas as gpd
 import numpy as np
@@ -337,29 +337,14 @@ class DataLoader:
             self.db.rollback()
             raise
 
-    def load_population_data_api(self, restrict_years: Optional[List[int]] = None):
-        """Load population data for all US counties (2009–2023) by age group using Census API (ACS 5-year, table B01001)
-
-        Parameters
-        ----------
-        restrict_years : Optional[List[int]]
-            If provided, only these years will be (attempted to be) loaded. Existing records
-            (fips, year, age_group) are skipped to allow safe incremental backfill.
-        """
+    def load_population_data_api(self):
+        """Load population data for all US counties (2009–2023) by age group using Census API (ACS 5-year, table B01001)"""
         api_key = os.getenv("CENSUS_API_KEY")
         if not api_key:
             logger.error("CENSUS_API_KEY is not set.")
             return
         c = Census(api_key)
-        years = restrict_years if restrict_years else list(range(2009, 2024))
-        years = sorted(set(years))
-        logger.info(f"Census API population load for years: {years}")
-
-        # Build a set of existing records for the target years to avoid duplicate inserts
-        logger.info("Checking existing population records to avoid duplicates...")
-        existing_records = set(self.db.query(Population.fips, Population.year, Population.age_group)
-                               .filter(Population.year.in_(years)).all())
-        logger.info(f"Found {len(existing_records)} existing population (fips, year, age_group) records for requested years")
+        years = range(2009, 2024)
 
         # Age group mapping: group index -> [male_var, female_var, ...]
         ACS_AGE_VARIABLES = {
@@ -445,10 +430,8 @@ class DataLoader:
                             # Normal processing for all counties/years
                             county_counter += 1
 
-                            # Add age group populations (skip if record already exists)
+                            # Add age group populations
                             for group_index, var_list in ACS_AGE_VARIABLES.items():
-                                if (fips, year, group_index) in existing_records:
-                                    continue
                                 total = sum_age_group(row, var_list)
                                 try:
                                     population_data.append(Population(
@@ -462,20 +445,19 @@ class DataLoader:
                                     logger.warning(
                                         f"Error creating Population record for {fips}, {year}, group {group_index}: {e}")
 
-                            # Add total population as age_group=0 (only once per county-year) if not existing
-                            if (fips, year, 0) not in existing_records:
-                                try:
-                                    total_pop = int(row.get('B01001_001E', 0))
-                                    population_data.append(Population(
-                                        fips=fips,
-                                        year=year,
-                                        age_group=0,  # Special index for total population
-                                        population=total_pop
-                                    ))
-                                    matched_count += 1
-                                except Exception as e:
-                                    logger.warning(
-                                        f"Error creating total Population record for {fips}, {year}: {e}")
+                            # Add total population as age_group=0 (only once per county-year)
+                            try:
+                                total_pop = int(row.get('B01001_001E', 0))
+                                population_data.append(Population(
+                                    fips=fips,
+                                    year=year,
+                                    age_group=0,  # Special index for total population
+                                    population=total_pop
+                                ))
+                                matched_count += 1
+                            except Exception as e:
+                                logger.warning(
+                                    f"Error creating total Population record for {fips}, {year}: {e}")
                             # Commit after every 100 counties
                             if county_counter % 100 == 0:
                                 self.db.bulk_save_objects(population_data)
@@ -494,50 +476,49 @@ class DataLoader:
                 logger.info(
                     f"Inserted final batch of {len(population_data)} population records")
 
-            # Manually insert Connecticut population data for 2022-2023 if those years are requested
-            if 2022 in years or 2023 in years:
-                logger.info(
-                    "Ensuring Connecticut population data for 2022-2023 is present...")
-                ct_population_2022_2023 = {
-                    '09001': {'name': 'Fairfield County', '2022': 848952, '2023': 846762},
-                    '09003': {'name': 'Hartford County', '2022': 837292, '2023': 830321},
-                    '09005': {'name': 'Litchfield County', '2022': 294306, '2023': 293386},
-                    '09007': {'name': 'Middlesex County', '2022': 157653, '2023': 157018},
-                    '09009': {'name': 'New Haven County', '2022': 851116, '2023': 848712},
-                    '09011': {'name': 'New London County', '2022': 371197, '2023': 370193},
-                    '09013': {'name': 'Tolland County', '2022': 139872, '2023': 138707},
-                    '09015': {'name': 'Windham County', '2022': 113412, '2023': 113246}
-                }
+            # Manually insert Connecticut population data for 2022-2023
+            logger.info(
+                "Inserting Connecticut population data for 2022-2023...")
+            ct_population_2022_2023 = {
+                '09001': {'name': 'Fairfield County', '2022': 848952, '2023': 846762},
+                '09003': {'name': 'Hartford County', '2022': 837292, '2023': 830321},
+                '09005': {'name': 'Litchfield County', '2022': 294306, '2023': 293386},
+                '09007': {'name': 'Middlesex County', '2022': 157653, '2023': 157018},
+                '09009': {'name': 'New Haven County', '2022': 851116, '2023': 848712},
+                '09011': {'name': 'New London County', '2022': 371197, '2023': 370193},
+                '09013': {'name': 'Tolland County', '2022': 139872, '2023': 138707},
+                '09015': {'name': 'Windham County', '2022': 113412, '2023': 113246}
+            }
 
-                ct_population_records = []
-                for fips, data in ct_population_2022_2023.items():
-                    for year in [y for y in [2022, 2023] if y in years]:
-                        # Skip if already have total population
-                        if (fips, year, 0) in existing_records:
-                            continue
-                        population_value = int(data[str(year)])
-                        # Insert total population (age_group=0)
+            ct_population_records = []
+            for fips, data in ct_population_2022_2023.items():
+                for year in [2022, 2023]:
+                    population_value = int(data[str(year)])
+                    # Insert total population (age_group=0)
+                    ct_population_records.append(Population(
+                        fips=fips,
+                        year=year,
+                        age_group=0,
+                        population=population_value
+                    ))
+                    # Insert age group populations (using proportional distribution from 2021)
+                    # For now, we'll use a simple distribution - this can be adjusted if needed
+                    for age_group in range(1, 19):
+                        # Use a simple proportional distribution based on 2021 ratios
+                        # This is a placeholder - you might want to adjust the age group distribution
                         ct_population_records.append(Population(
                             fips=fips,
                             year=year,
-                            age_group=0,
-                            population=population_value
+                            age_group=age_group,
+                            # Simple equal distribution
+                            population=int(population_value / 19)
                         ))
-                        for age_group in range(1, 19):
-                            if (fips, year, age_group) in existing_records:
-                                continue
-                            ct_population_records.append(Population(
-                                fips=fips,
-                                year=year,
-                                age_group=age_group,
-                                population=int(population_value / 19)
-                            ))
 
-                if ct_population_records:
-                    self.db.bulk_save_objects(ct_population_records)
-                    self.db.commit()
-                    logger.info(
-                        f"Inserted {len(ct_population_records)} Connecticut population records for 2022-2023")
+            if ct_population_records:
+                self.db.bulk_save_objects(ct_population_records)
+                self.db.commit()
+                logger.info(
+                    f"Inserted {len(ct_population_records)} Connecticut population records for 2022-2023")
 
             logger.info("Population data loaded from Census API.")
             logger.info(
@@ -728,7 +709,7 @@ class DataLoader:
             # YEARLY AGGREGATIONS
             logger.info("Processing yearly aggregations...")
             yearly_results = self.db.execute(text("""
-                SELECT
+                SELECT 
                     fips,
                     EXTRACT(year FROM date) as year,
                     AVG(total) as avg_total,
@@ -772,7 +753,7 @@ class DataLoader:
             # MONTHLY AGGREGATIONS
             logger.info("Processing monthly aggregations...")
             monthly_results = self.db.execute(text("""
-                SELECT
+                SELECT 
                     fips,
                     EXTRACT(year FROM date) as year,
                     EXTRACT(month FROM date) as month,
@@ -819,10 +800,10 @@ class DataLoader:
             # SEASONAL AGGREGATIONS
             logger.info("Processing seasonal aggregations...")
             seasonal_results = self.db.execute(text("""
-                SELECT
+                SELECT 
                     fips,
                     EXTRACT(year FROM date) as year,
-                    CASE
+                    CASE 
                         WHEN EXTRACT(month FROM date) IN (12, 1, 2) THEN 'winter'
                         WHEN EXTRACT(month FROM date) IN (3, 4, 5) THEN 'spring'
                         WHEN EXTRACT(month FROM date) IN (6, 7, 8) THEN 'summer'
@@ -836,8 +817,8 @@ class DataLoader:
                     MAX(nonfire) as max_nonfire,
                     COUNT(*) as days_count
                 FROM daily_pm25
-                GROUP BY fips, EXTRACT(year FROM date),
-                    CASE
+                GROUP BY fips, EXTRACT(year FROM date), 
+                    CASE 
                         WHEN EXTRACT(month FROM date) IN (12, 1, 2) THEN 'winter'
                         WHEN EXTRACT(month FROM date) IN (3, 4, 5) THEN 'spring'
                         WHEN EXTRACT(month FROM date) IN (6, 7, 8) THEN 'summer'
