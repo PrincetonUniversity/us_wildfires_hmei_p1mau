@@ -1846,8 +1846,8 @@ def main():
             # loader.load_counties()
 
             # Step 3: Load population data (from API for 2009-2023)
-            loader.load_population_data()
-            loader.load_population_data_api()
+            # loader.load_population_data()
+            # loader.load_population_data_api()
 
             # Step 4: Load baseline mortality rates
             # loader.load_baseline_mortality()
