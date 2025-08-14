@@ -573,7 +573,7 @@ function Methodology() {
                         🚧 Coming Soon
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#856404' }}>
-                        Data download functionality is currently under development. The interface below shows the planned features.
+                        Data download functionality is currently under development.
                     </Typography>
                 </Box>
 

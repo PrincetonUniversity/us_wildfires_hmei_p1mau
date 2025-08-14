@@ -479,6 +479,63 @@ class DataLoader:
             # Manually insert Connecticut population data for 2022-2023
             logger.info(
                 "Inserting Connecticut population data for 2022-2023...")
+
+            # First, get the actual 2021 Connecticut age group distribution from the database
+            ct_2021_distribution = {}
+            ct_counties = ['09001', '09003', '09005',
+                           '09007', '09009', '09011', '09013', '09015']
+
+            # Get 2021 data for Connecticut counties to calculate distribution
+            for fips in ct_counties:
+                ct_2021_data = self.db.query(Population).filter(
+                    Population.fips == fips,
+                    Population.year == 2021,
+                    # Exclude total population (age_group=0)
+                    Population.age_group > 0
+                ).all()
+
+                if ct_2021_data:
+                    # Calculate distribution from actual 2021 data
+                    total_2021_pop = sum(
+                        record.population for record in ct_2021_data)
+                    if total_2021_pop > 0:
+                        for record in ct_2021_data:
+                            if record.age_group not in ct_2021_distribution:
+                                ct_2021_distribution[record.age_group] = 0
+                            ct_2021_distribution[record.age_group] += record.population
+
+            # Normalize the distribution to percentages
+            if ct_2021_distribution:
+                total_ct_2021 = sum(ct_2021_distribution.values())
+                ct_2021_distribution = {age_group: count / total_ct_2021
+                                        for age_group, count in ct_2021_distribution.items()}
+                logger.info(
+                    f"Using actual 2021 Connecticut age group distribution: {ct_2021_distribution}")
+            else:
+                # Fallback to realistic distribution if no 2021 data found
+                logger.warning(
+                    "No 2021 Connecticut data found, using realistic US distribution")
+                ct_2021_distribution = {
+                    1: 0.061,   # 0-4 years: 6.1%
+                    2: 0.062,   # 5-9 years: 6.2%
+                    3: 0.063,   # 10-14 years: 6.3%
+                    4: 0.065,   # 15-19 years: 6.5%
+                    5: 0.066,   # 20-24 years: 6.6%
+                    6: 0.065,   # 25-29 years: 6.5%
+                    7: 0.064,   # 30-34 years: 6.4%
+                    8: 0.063,   # 35-39 years: 6.3%
+                    9: 0.062,   # 40-44 years: 6.2%
+                    10: 0.061,  # 45-49 years: 6.1%
+                    11: 0.060,  # 50-54 years: 6.0%
+                    12: 0.059,  # 55-59 years: 5.9%
+                    13: 0.058,  # 60-64 years: 5.8%
+                    14: 0.055,  # 65-69 years: 5.5%
+                    15: 0.050,  # 70-74 years: 5.0%
+                    16: 0.040,  # 75-79 years: 4.0%
+                    17: 0.030,  # 80-84 years: 3.0%
+                    18: 0.025   # 85+ years: 2.5%
+                }
+
             ct_population_2022_2023 = {
                 '09001': {'name': 'Fairfield County', '2022': 848952, '2023': 846762},
                 '09003': {'name': 'Hartford County', '2022': 837292, '2023': 830321},
@@ -502,16 +559,19 @@ class DataLoader:
                         population=population_value
                     ))
                     # Insert age group populations (using proportional distribution from 2021)
-                    # For now, we'll use a simple distribution - this can be adjusted if needed
+                    # Realistic 2021 age group distribution based on US demographics
+                    # Age group percentages based on typical US population pyramid
+                    age_group_distribution = ct_2021_distribution
+
                     for age_group in range(1, 19):
-                        # Use a simple proportional distribution based on 2021 ratios
-                        # This is a placeholder - you might want to adjust the age group distribution
+                        # Calculate population for this age group using realistic distribution
+                        age_group_population = int(
+                            population_value * age_group_distribution[age_group])
                         ct_population_records.append(Population(
                             fips=fips,
                             year=year,
                             age_group=age_group,
-                            # Simple equal distribution
-                            population=int(population_value / 19)
+                            population=age_group_population
                         ))
 
             if ct_population_records:
@@ -1786,8 +1846,8 @@ def main():
             # loader.load_counties()
 
             # Step 3: Load population data (from API for 2009-2023)
-            # loader.load_population_data()
-            # loader.load_population_data_api()
+            loader.load_population_data()
+            loader.load_population_data_api()
 
             # Step 4: Load baseline mortality rates
             # loader.load_baseline_mortality()
