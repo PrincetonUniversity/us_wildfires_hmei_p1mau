@@ -58,7 +58,7 @@ def load_county_geometries():
     if COUNTY_GEOMETRIES is None:
         try:
             # Path to the county boundaries shapefile
-            shapefile_path = "data/shapefiles/county/cb_2024_us_county_5m.shp"
+            shapefile_path = "data/shapefiles/county/cb_2018_us_county_5m.shp"
 
             # Read the shapefile
             gdf = gpd.read_file(shapefile_path)
