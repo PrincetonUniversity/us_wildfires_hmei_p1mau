@@ -15,12 +15,16 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Depends, status, BackgroundTasks, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
 from sqlalchemy import func, and_, extract
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import QueuePool
 import geopandas as gpd
 from shapely.geometry import mapping
+import gzip
+import json
 
 # Local application imports
 from db.database import SessionLocal
@@ -50,6 +54,10 @@ executor = ThreadPoolExecutor(max_workers=4)
 
 # Load county geometries once at startup
 COUNTY_GEOMETRIES = None
+
+# Simple in-memory cache for choropleth data
+CHOROPLETH_CACHE = {}
+CACHE_MAX_SIZE = 100  # Maximum number of cached responses
 
 
 def load_county_geometries():
@@ -90,6 +98,201 @@ def load_county_geometries():
 
     return COUNTY_GEOMETRIES
 
+
+def get_cache_key(endpoint: str, **params) -> str:
+    """Generate a cache key for the given endpoint and parameters."""
+    # Sort parameters to ensure consistent cache keys
+    sorted_params = sorted(params.items())
+    param_str = "&".join(
+        [f"{k}={v}" for k, v in sorted_params if v is not None])
+    return f"{endpoint}:{param_str}"
+
+
+def get_from_cache(cache_key: str):
+    """Get data from cache if it exists and hasn't expired."""
+    if cache_key in CHOROPLETH_CACHE:
+        data, timestamp = CHOROPLETH_CACHE[cache_key]
+        # Check if cache entry is still valid (5 minutes)
+        if (datetime.now().timestamp() - timestamp) < CACHE_TTL:
+            return data
+        else:
+            # Remove expired entry
+            del CHOROPLETH_CACHE[cache_key]
+    return None
+
+
+def set_cache(cache_key: str, data):
+    """Store data in cache with timestamp."""
+    # Simple LRU: remove oldest entries if cache is full
+    if len(CHOROPLETH_CACHE) >= CACHE_MAX_SIZE:
+        # Remove the oldest entry
+        oldest_key = min(CHOROPLETH_CACHE.keys(),
+                         key=lambda k: CHOROPLETH_CACHE[k][1])
+        del CHOROPLETH_CACHE[oldest_key]
+
+    CHOROPLETH_CACHE[cache_key] = (data, datetime.now().timestamp())
+
+
+async def preload_common_datasets():
+    """Preload common choropleth datasets to warm up the cache."""
+
+    # Common datasets to preload
+    common_requests = [
+        # Most common PM2.5 average requests
+        {"endpoint": "average", "time_scale": "yearly",
+            "year": 2020, "sub_metric": "total"},
+        {"endpoint": "average", "time_scale": "yearly",
+            "year": 2021, "sub_metric": "total"},
+        {"endpoint": "average", "time_scale": "yearly",
+            "year": 2022, "sub_metric": "total"},
+        {"endpoint": "average", "time_scale": "yearly",
+            "year": 2023, "sub_metric": "total"},
+        {"endpoint": "average", "time_scale": "yearly",
+            "year": 2020, "sub_metric": "fire"},
+        {"endpoint": "average", "time_scale": "yearly",
+            "year": 2021, "sub_metric": "fire"},
+        {"endpoint": "average", "time_scale": "yearly",
+            "year": 2022, "sub_metric": "fire"},
+        {"endpoint": "average", "time_scale": "yearly",
+            "year": 2023, "sub_metric": "fire"},
+
+        # Common max PM2.5 requests
+        {"endpoint": "max", "time_scale": "yearly",
+            "year": 2020, "sub_metric": "total"},
+        {"endpoint": "max", "time_scale": "yearly",
+            "year": 2021, "sub_metric": "total"},
+        {"endpoint": "max", "time_scale": "yearly",
+            "year": 2022, "sub_metric": "total"},
+        {"endpoint": "max", "time_scale": "yearly",
+            "year": 2023, "sub_metric": "total"},
+
+        # Common population requests
+        {"endpoint": "population", "year": 2020},
+        {"endpoint": "population", "year": 2021},
+        {"endpoint": "population", "year": 2022},
+        {"endpoint": "population", "year": 2023},
+    ]
+
+    # Preload each dataset
+    for request_params in common_requests:
+        try:
+            cache_key = get_cache_key(**request_params)
+
+            # Skip if already cached
+            if get_from_cache(cache_key):
+                continue
+
+            # Create a database session for preloading
+            db = SessionLocal()
+            try:
+                if request_params["endpoint"] == "average":
+                    summary_model = YearlyPM25Summary
+                    query = build_choropleth_query(
+                        db, request_params["time_scale"],
+                        request_params["year"], None, None, summary_model)
+                    results = query.all()
+                    col_map = {"total": "avg_total",
+                               "fire": "avg_fire", "nonfire": "avg_nonfire"}
+                    col_name = col_map.get(
+                        request_params["sub_metric"], "avg_total")
+
+                    def value_func(row):
+                        return float(getattr(row, col_name) or 0)
+                    features = build_geojson_features(results, value_func)
+
+                    response_data = {
+                        "type": "FeatureCollection",
+                        "features": features,
+                        "metadata": {
+                            "time_scale": request_params["time_scale"],
+                            "year": request_params["year"],
+                            "metric": col_name,
+                            "feature_count": len(features)
+                        }
+                    }
+
+                elif request_params["endpoint"] == "max":
+                    summary_model = YearlyPM25Summary
+                    query = build_choropleth_query(
+                        db, request_params["time_scale"],
+                        request_params["year"], None, None, summary_model)
+                    results = query.all()
+                    col_map = {"total": "max_total",
+                               "fire": "max_fire", "nonfire": "max_nonfire"}
+                    col_name = col_map.get(
+                        request_params["sub_metric"], "max_total")
+
+                    def value_func(row):
+                        return float(getattr(row, col_name) or 0)
+                    features = build_geojson_features(results, value_func)
+
+                    response_data = {
+                        "type": "FeatureCollection",
+                        "features": features,
+                        "metadata": {
+                            "time_scale": request_params["time_scale"],
+                            "year": request_params["year"],
+                            "metric": col_name,
+                            "feature_count": len(features)
+                        }
+                    }
+
+                elif request_params["endpoint"] == "population":
+                    query = db.query(
+                        County.fips,
+                        County.name.label("county_name"),
+                        County.geometry,
+                        Population.population
+                    ).outerjoin(
+                        Population, and_(
+                            Population.fips == County.fips,
+                            Population.year == request_params["year"],
+                            Population.age_group == 0
+                        )
+                    ).filter(~County.fips.startswith('72'))
+
+                    results = query.all()
+                    features = []
+
+                    for row in results:
+                        if not row.geometry:
+                            continue
+                        pop = row.population or 0
+                        if pop is None or not math.isfinite(pop):
+                            pop = 0
+                        feature = {
+                            "type": "Feature",
+                            "geometry": row.geometry,
+                            "properties": {
+                                "fips": row.fips,
+                                "county_name": row.county_name,
+                                "value": int(pop),
+                                "population": int(pop)
+                            }
+                        }
+                        features.append(feature)
+
+                    response_data = {
+                        "type": "FeatureCollection",
+                        "features": features,
+                        "metadata": {
+                            "time_scale": "yearly",
+                            "year": request_params["year"],
+                            "metric": "population",
+                            "feature_count": len(features)
+                        }
+                    }
+
+                # Cache the response
+                set_cache(cache_key, response_data)
+
+            finally:
+                db.close()
+
+        except Exception as e:
+            continue
+
+
 # Application lifespan
 
 
@@ -100,6 +303,9 @@ async def lifespan(app: FastAPI):
 
     # Load county geometries
     load_county_geometries()
+
+    # Preload common choropleth datasets
+    await preload_common_datasets()
 
     yield
 
@@ -123,6 +329,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+# Add GZip compression middleware
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # Database session dependency
@@ -504,6 +713,18 @@ async def get_choropleth_average(
     db: Session = Depends(get_db)
 ):
     """Get average PM2.5 choropleth data."""
+    # Check cache first
+    cache_key = get_cache_key("average",
+                              time_scale=time_scale,
+                              year=year,
+                              month=month,
+                              season=season,
+                              sub_metric=sub_metric)
+
+    cached_data = get_from_cache(cache_key)
+    if cached_data:
+        return cached_data
+
     summary_model = {
         "yearly": YearlyPM25Summary,
         "monthly": MonthlyPM25Summary,
@@ -522,7 +743,8 @@ async def get_choropleth_average(
     def value_func(row):
         return float(getattr(row, col_name) or 0)
     features = build_geojson_features(results, value_func)
-    return {
+
+    response_data = {
         "type": "FeatureCollection",
         "features": features,
         "metadata": {
@@ -535,6 +757,11 @@ async def get_choropleth_average(
         }
     }
 
+    # Cache the response
+    set_cache(cache_key, response_data)
+
+    return response_data
+
 
 @choropleth_router.get("/max")
 async def get_choropleth_max(
@@ -546,6 +773,18 @@ async def get_choropleth_max(
     db: Session = Depends(get_db)
 ):
     """Get max PM2.5 choropleth data."""
+    # Check cache first
+    cache_key = get_cache_key("max",
+                              time_scale=time_scale,
+                              year=year,
+                              month=month,
+                              season=season,
+                              sub_metric=sub_metric)
+
+    cached_data = get_from_cache(cache_key)
+    if cached_data:
+        return cached_data
+
     summary_model = {
         "yearly": YearlyPM25Summary,
         "monthly": MonthlyPM25Summary,
@@ -564,7 +803,8 @@ async def get_choropleth_max(
     def value_func(row):
         return float(getattr(row, col_name) or 0)
     features = build_geojson_features(results, value_func)
-    return {
+
+    response_data = {
         "type": "FeatureCollection",
         "features": features,
         "metadata": {
@@ -576,6 +816,11 @@ async def get_choropleth_max(
             "feature_count": len(features)
         }
     }
+
+    # Cache the response
+    set_cache(cache_key, response_data)
+
+    return response_data
 
 
 @choropleth_router.get("/pop_weighted")
@@ -1692,6 +1937,28 @@ def download_yll_data(
         logger.error("Error in YLL download endpoint: %s",
                      str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/states/boundaries")
+async def get_state_boundaries():
+    """Get state boundaries as GeoJSON for map outlines."""
+    try:
+        # Load state shapefile
+        shapefile_path = "data/shapefiles/state/cb_2024_us_state_5m.shp"
+        gdf = gpd.read_file(shapefile_path)
+
+        # Convert to GeoJSON
+        geojson = gdf.to_crs('EPSG:4326').to_json()
+
+        return Response(
+            content=geojson,
+            media_type="application/json"
+        )
+    except Exception as e:
+        logger.error("Error loading state boundaries: %s",
+                     str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500, detail="Error loading state boundaries")
 
 
 @app.get("/api/health")

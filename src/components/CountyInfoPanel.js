@@ -40,6 +40,7 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty, sidebarWidth =
     const isSelectedCounty = onClearSelectedCounty !== null && onClearSelectedCounty !== undefined;
     const {
         name,
+        stateAbbr,
         value,
         population,
         avg_total,
@@ -92,20 +93,20 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty, sidebarWidth =
         if (activeLayer === 'average') {
             return <>
                 <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Average Total PM2.5: {avg_total !== undefined ? avg_total.toFixed(2) : 'N/A'} µg/m³</Typography>
-                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Average Fire PM2.5: {avg_fire !== undefined ? avg_fire.toFixed(2) : 'N/A'} µg/m³</Typography>
-                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Average Non-fire PM2.5: {avg_nonfire !== undefined ? avg_nonfire.toFixed(2) : 'N/A'} µg/m³</Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Average Smoke PM2.5: {avg_fire !== undefined ? avg_fire.toFixed(2) : 'N/A'} µg/m³</Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Average Non-smoke PM2.5: {avg_nonfire !== undefined ? avg_nonfire.toFixed(2) : 'N/A'} µg/m³</Typography>
             </>;
         } else if (activeLayer === 'max') {
             return <>
                 <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Max Total PM2.5: {max_total !== undefined ? max_total.toFixed(2) : 'N/A'} µg/m³</Typography>
-                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Max Fire PM2.5: {max_fire !== undefined ? max_fire.toFixed(2) : 'N/A'} µg/m³</Typography>
-                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Max Non-fire PM2.5: {max_nonfire !== undefined ? max_nonfire.toFixed(2) : 'N/A'} µg/m³</Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Max Smoke PM2.5: {max_fire !== undefined ? max_fire.toFixed(2) : 'N/A'} µg/m³</Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Max Non-smoke PM2.5: {max_nonfire !== undefined ? max_nonfire.toFixed(2) : 'N/A'} µg/m³</Typography>
             </>;
         } else if (activeLayer === 'pop_weighted') {
             return <>
                 <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Pop-weighted Total: {pop_weighted_total !== undefined ? pop_weighted_total.toLocaleString() : 'N/A'} person-µg/m³</Typography>
-                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Pop-weighted Fire: {pop_weighted_fire !== undefined ? pop_weighted_fire.toLocaleString() : 'N/A'} person-µg/m³</Typography>
-                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Pop-weighted Non-fire: {pop_weighted_nonfire !== undefined ? pop_weighted_nonfire.toLocaleString() : 'N/A'} person-µg/m³</Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Pop-weighted Smoke: {pop_weighted_fire !== undefined ? pop_weighted_fire.toLocaleString() : 'N/A'} person-µg/m³</Typography>
+                <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>Pop-weighted Non-smoke: {pop_weighted_nonfire !== undefined ? pop_weighted_nonfire.toLocaleString() : 'N/A'} person-µg/m³</Typography>
             </>;
         } else if (activeLayer === 'mortality') {
             return <>
@@ -113,22 +114,22 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty, sidebarWidth =
                     Excess Mortality (% of Population): {value !== undefined ? value.toFixed(3) + '%' : 'N/A'}
                 </Typography>
                 <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
-                    Excess from Fire-attributed PM2.5: {fire_excess !== undefined ? fire_excess.toFixed(1) : 'N/A'} deaths/year
+                    Excess from Smoke-attributed PM2.5: {fire_excess !== undefined ? fire_excess.toFixed(1) : 'N/A'} deaths/year
                 </Typography>
                 <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
-                    Excess from Non-fire PM2.5: {nonfire_excess !== undefined ? nonfire_excess.toFixed(1) : 'N/A'} deaths/year
+                    Excess from Non-smoke PM2.5: {nonfire_excess !== undefined ? nonfire_excess.toFixed(1) : 'N/A'} deaths/year
                 </Typography>
             </>;
         } else if (activeLayer === 'yll') {
             return <>
                 <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
-                    YLL (Years of Life Lost): {yll_total !== undefined ? yll_total.toFixed(1) : 'N/A'}
+                    Years of Life Lost: {yll_total !== undefined ? yll_total.toFixed(1) : 'N/A'}
                 </Typography>
                 <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
-                    YLL from Fire-attributed PM2.5: {yll_fire !== undefined ? yll_fire.toFixed(1) : 'N/A'}
+                    Years of Life Lost from Smoke-attributed PM2.5: {yll_fire !== undefined ? yll_fire.toFixed(1) : 'N/A'}
                 </Typography>
                 <Typography variant="body2" sx={{ fontSize: '0.93em', mb: 0.1 }}>
-                    YLL from Non-fire PM2.5: {yll_nonfire !== undefined ? yll_nonfire.toFixed(1) : 'N/A'}
+                    Years of Life Lost from Non-smoke PM2.5: {yll_nonfire !== undefined ? yll_nonfire.toFixed(1) : 'N/A'}
                 </Typography>
             </>;
         } else if (activeLayer === 'population') {
@@ -165,7 +166,9 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty, sidebarWidth =
                     ×
                 </button>
             )}
-            <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ fontSize: '1.08em', mb: 0.25 }}>{name || 'County'}</Typography>
+            <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{ fontSize: '1.08em', mb: 0.25 }}>
+                {stateAbbr ? `${name || 'County'}, ${stateAbbr}` : (name || 'County')}
+            </Typography>
             {/* Exceedance category for current layer, if active */}
             {isExceedanceLayer && exceedanceValue !== null && exceedanceValue !== undefined && (
                 <Box sx={{ mb: 1, p: 1, background: '#fffde7', borderRadius: 2, border: '1.5px solid #ffe082', display: 'flex', alignItems: 'center' }}>
@@ -203,7 +206,7 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty, sidebarWidth =
                 <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }} className="chart-container">
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
                         <Typography variant="subtitle2" fontWeight="bold" sx={{ fontSize: '1em' }}>
-                            {activeLayer === 'mortality' ? 'Excess Mortality Bar Chart' : activeLayer === 'yll' ? 'YLL Bar Chart' : 'PM2.5 Bar Chart'}
+                            {activeLayer === 'mortality' ? 'Excess Mortality Bar Chart' : activeLayer === 'yll' ? 'Years of Life Lost Bar Chart' : 'PM2.5 Bar Chart'}
                         </Typography>
                         <button
                             onClick={() => handleChartExpand('pm25')}
@@ -258,7 +261,7 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty, sidebarWidth =
             {decompositionData && activeLayer === 'mortality' && (
                 <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }} className="chart-container">
                     <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: '1em', mb: 0.5 }}>
-                        Decomposition Analysis (2006–2023) - {decompositionPM25Type === 'fire' ? 'Fire PM2.5' : 'Total PM2.5'}
+                        Decomposition Analysis (2006–2023) - {decompositionPM25Type === 'fire' ? 'Smoke PM2.5' : 'Total PM2.5'}
                     </Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.8em', mb: 0.5 }}>
                         Factor contribution to change in excess mortality

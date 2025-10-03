@@ -186,7 +186,7 @@ const Sidebar = ({
                     mortalitySubMetric={mortalitySubMetric}
                     setMortalitySubMetric={setMortalitySubMetric}
                 />
-                {/* Age group dropdown for mortality and YLL layers, below sub-metric pill, above time controls */}
+                {/* Age group dropdown for mortality and Years of Life Lost layers, below sub-metric pill, above time controls */}
                 {!(EXCEEDANCE_LAYERS.includes(activeLayer)) && (activeLayer === 'mortality' || activeLayer === 'yll') && (
                     <Box sx={{ mt: 1, mb: 1 }}>
                         <FormControl fullWidth size="small" variant="outlined">

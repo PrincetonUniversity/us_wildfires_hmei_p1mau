@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { createRoot } from 'react-dom/client';
@@ -170,10 +170,53 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
   const [loading, setLoading] = useState(true);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [choroplethData, setChoroplethData] = useState(null);
+  const [stateData, setStateData] = useState(null);
   const [decompositionPM25Type, setDecompositionPM25Type] = useState("total");
   const currentCountyRef = useRef(null);
+  const fetchTimeoutRef = useRef(null);
 
 
+
+  // Function to load state outlines
+  const loadStateOutlines = async () => {
+    if (!map.current) return;
+
+    try {
+      // Fetch state boundaries from API
+      const response = await fetch(`${API_BASE_URL}/api/states/boundaries`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const stateData = await response.json();
+
+      // Add state outline source and layer
+      if (!map.current.getSource('states')) {
+        map.current.addSource('states', {
+          type: 'geojson',
+          data: stateData
+        });
+      } else {
+        map.current.getSource('states').setData(stateData);
+      }
+
+      // Add state outline layer
+      if (!map.current.getLayer('state-outlines')) {
+        map.current.addLayer({
+          id: 'state-outlines',
+          type: 'line',
+          source: 'states',
+          paint: {
+            'line-color': '#666666',
+            'line-width': 1.5,
+            'line-opacity': 0.8
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error loading state outlines:', error);
+    }
+  };
 
   // Function to adjust map bounds based on sidebar width
   const adjustMapBounds = () => {
@@ -239,8 +282,35 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
     }
   }
 
+  // Debounced fetch function to prevent rapid successive calls
+  const debouncedFetchChoroplethData = useCallback(() => {
+    if (fetchTimeoutRef.current) {
+      clearTimeout(fetchTimeoutRef.current);
+    }
+
+    fetchTimeoutRef.current = setTimeout(async () => {
+      await fetchChoroplethData();
+    }, 300); // 300ms debounce
+  }, [activeLayer, timeScale, year, month, season, pm25SubLayer, selectedAgeGroups, subMetric]);
+
+  // Function to fetch state data
+  const fetchStateData = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/states/geojson`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      if (data && data.features) {
+        setStateData(data);
+      }
+    } catch (error) {
+      console.error('Error fetching state data:', error);
+    }
+  }, []);
+
   // Function to fetch choropleth data
-  const fetchChoroplethData = async () => {
+  const fetchChoroplethData = useCallback(async () => {
     if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer) && !EXCEEDANCE_LAYERS.includes(activeLayer)) return;
 
     try {
@@ -314,12 +384,19 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeLayer, timeScale, year, month, season, pm25SubLayer, selectedAgeGroups, subMetric, metric]);
 
   // Fetch choropleth data when mapRefreshKey or any relevant prop changes
   useEffect(() => {
-    fetchChoroplethData();
-  }, [mapRefreshKey, activeLayer, timeScale, year, month, season, pm25SubLayer, selectedAgeGroups, subMetric]);
+    debouncedFetchChoroplethData();
+
+    // Cleanup timeout on unmount
+    return () => {
+      if (fetchTimeoutRef.current) {
+        clearTimeout(fetchTimeoutRef.current);
+      }
+    };
+  }, [mapRefreshKey, activeLayer, timeScale, year, month, season, pm25SubLayer, selectedAgeGroups, subMetric, debouncedFetchChoroplethData]);
 
 
 
@@ -379,11 +456,11 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
     legend.style.display = 'block';
     let colorScale = getColorScale(choroplethData) || [];
     let metricLabel = getMetricLabel(activeLayer);
-    // Custom label for mortality/YLL
+    // Custom label for mortality/Years of Life Lost
     if (activeLayer === 'mortality' || activeLayer === 'yll') {
       if (activeLayer === 'yll') {
-        metricLabel = 'Normalized YLL (fraction of possible years lost)';
-        // For YLL, use the selected subMetric property
+        metricLabel = 'Normalized Years of Life Lost (fraction of possible years lost)';
+        // For Years of Life Lost, use the selected subMetric property
         if (choroplethData && choroplethData.features && choroplethData.features.length > 0) {
           const metricProp = 'value';
           const values = choroplethData.features.map(f => f.properties[metricProp]).filter(v => typeof v === 'number' && isFinite(v));
@@ -733,8 +810,26 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
 
     // Add map load event handler
     map.current.on('load', () => {
+      // remove unwanted layers
+      const layersToRemove = map.current.getStyle().layers.map(l => l.id).filter(id =>
+        id.startsWith('road_') ||
+        id.startsWith('bridge_') ||
+        id.startsWith('tunnel_') ||
+        id.startsWith('roadname_')
+      );
+
+      layersToRemove.forEach(id => {
+        if (map.current.getLayer(id)) {
+          map.current.removeLayer(id);
+        }
+      });
+
       setMapLoaded(true);
       onMapLoaded();
+
+      // Load state outlines
+      loadStateOutlines();
+
       fetchChoroplethData();
       // Initial adjustment of map bounds
       setTimeout(() => adjustMapBounds(), 100);
@@ -793,7 +888,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
       return MORTALITY_COLORS;
     }
     if (activeLayer === 'yll') {
-      // Dynamic color scale for YLL
+      // Dynamic color scale for Years of Life Lost
       if (data && data.features && data.features.length > 0) {
         const values = data.features.map(f => f.properties.value).filter(v => typeof v === 'number' && isFinite(v));
         if (values.length > 0) {
@@ -816,7 +911,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
           return colorScale;
         }
       }
-      return MORTALITY_COLORS; // Fallback to mortality colors for YLL
+      return MORTALITY_COLORS; // Fallback to mortality colors for Years of Life Lost
     }
     if (activeLayer === 'population') {
       return POPULATION_COLORS;
@@ -845,7 +940,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
       return 'Excess Mortality (% of Population)';
     }
     if (activeLayer === 'yll') {
-      return 'Years of Life Lost (YLL)';
+      return 'Years of Life Lost';
     }
     if (activeLayer === 'population') {
       return 'Population';
@@ -853,13 +948,13 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
 
     const labels = {
       'avg_total': 'Average Total PM2.5',
-      'avg_fire': 'Average Fire PM2.5',
-      'avg_nonfire': 'Average Non-fire PM2.5',
+      'avg_fire': 'Average Smoke PM2.5',
+      'avg_nonfire': 'Average Non-smoke PM2.5',
       'max_total': 'Maximum Total PM2.5',
-      'max_fire': 'Maximum Fire PM2.5',
+      'max_fire': 'Maximum Smoke PM2.5',
       'pop_weighted_total': 'Population-Weighted Total PM2.5',
-      'pop_weighted_fire': 'Population-Weighted Fire PM2.5',
-      'pop_weighted_nonfire': 'Population-Weighted Non-fire PM2.5'
+      'pop_weighted_fire': 'Population-Weighted Smoke PM2.5',
+      'pop_weighted_nonfire': 'Population-Weighted Non-smoke PM2.5'
     };
     return labels[metric] || 'PM2.5';
   };
@@ -1004,6 +1099,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
           }
           const countyData = {
             name: countyName,
+            stateAbbr: getStateFromFIPS(countyId),
             value,
             fips: countyId,
             population: props.population,
@@ -1059,8 +1155,10 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
             } else {
               formattedValue = 'N/A';
             }
+            const stateAbbr = getStateFromFIPS(countyId);
+            const displayName = stateAbbr ? `${countyName}, ${stateAbbr}` : countyName;
             popup.current.setLngLat(e.lngLat)
-              .setHTML(`<div style='font-weight:bold;font-size:1.1em;'>${countyName}</div><div>Value: ${formattedValue}</div>`)
+              .setHTML(`<div style='font-weight:bold;font-size:1.1em;'>${displayName}</div><div>Value: ${formattedValue}</div>`)
               .addTo(mapInstance);
           }
         } else {

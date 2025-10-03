@@ -28,7 +28,7 @@ function About({ onTabChange }) {
                     The platform enables detailed examination of both spatial and temporal patterns,
                     allowing users to move seamlessly between nationwide trends and localized county-level
                     insights. This makes it possible to identify areas with the highest smoke-related health burdens,
-                    track changes over multiple years, and compare patterns between fire and non-fire sources of PM₂.₅.
+                    track changes over multiple years, and compare patterns between smoke and non-smoke sources of PM₂.₅.
                     Researchers, policymakers, and the public can use these capabilities to better understand geographic
                     disparities, highlight vulnerable populations, and inform targeted interventions.
                 </Typography>
@@ -51,14 +51,14 @@ function About({ onTabChange }) {
                 <Typography variant="body1" component="div" sx={{ pl: 2 }}>
                     <ul>
                         <li><strong>Interactive Maps</strong> — County-level PM₂.₅ exposure and mortality metrics with dynamic color-coded choropleth visualization</li>
-                        <li><strong>Multi-Layer Analysis</strong> — Switch between PM₂.₅ data and health metrics (mortality, YLL, population)</li>
-                        <li><strong>Source Attribution</strong> — Separate analysis of fire vs. non-fire PM₂.₅ contributions with distinct color coding</li>
+                        <li><strong>Multi-Layer Analysis</strong> — Switch between PM₂.₅ data and health metrics (mortality, Years of Life Lost, population)</li>
+                        <li><strong>Source Attribution</strong> — Separate analysis of smoke vs. non-smoke PM₂.₅ contributions with distinct color coding</li>
                         <li><strong>Time-Scale Analysis</strong> — Daily, monthly, seasonal, and annual views with flexible time controls</li>
                         <li><strong>County Profiles</strong> — Detailed county information panels showing PM₂.₅ statistics, population data, and health metrics</li>
                         <li><strong>Interactive Charts</strong> — Bar charts showing temporal trends in PM₂.₅ levels and mortality rates by source</li>
                         <li><strong>Decomposition Analysis</strong> — Breakdowns of mortality changes into demographic (population growth, aging) and environmental (exposure change, baseline mortality) contributions</li>
-                        <li><strong>Mortality Analysis</strong> — Age-group specific mortality data with both death counts and Years of Life Lost (YLL) metrics</li>
-                        <li><strong>Exceedance Tracking</strong> — Monitor counties where 2021-2023 average PM₂.₅ levels exceed EPA air quality standards (8 and 9 µg/m³) with fire vs. non-fire attribution</li>
+                        <li><strong>Mortality Analysis</strong> — Age-group specific mortality data with both death counts and Years of Life Lost metrics</li>
+                        <li><strong>Exceedance Tracking</strong> — Monitor counties where 2021-2023 average PM₂.₅ levels exceed EPA air quality standards (8 and 9 µg/m³) with smoke vs. non-smoke attribution</li>
                         <li><strong>Dynamic Legend</strong> — Context-aware color scales and thresholds that adapt to the selected data layer</li>
                         <li><strong>Hover & Click Interactions</strong> — Real-time county information on hover and detailed analysis on click</li>
                     </ul>

@@ -14,7 +14,7 @@ function Navigation({ activeTab, onTabChange }) {
                 className="app-logo"
             />
             <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', flex: 1, textAlign: 'center' }}>
-                PM2.5 Wildfire Impact Map
+                PM2.5 Wildfire Smoke Impact Map
             </Typography>
             <Tabs
                 value={activeTab}

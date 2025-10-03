@@ -26,7 +26,7 @@ const LayerControl = ({ activeLayer, onLayerChange }) => {
           <FormControlLabel
             value="fire_pm25"
             control={<Radio size="small" />}
-            label="Fire-attributed PM2.5 (µg/m³)"
+            label="Smoke-attributed PM2.5 (µg/m³)"
           />
         </RadioGroup>
       </FormControl>

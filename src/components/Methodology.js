@@ -174,11 +174,11 @@ function Methodology() {
                         <Card elevation={1} sx={{ height: '100%' }}>
                             <CardContent>
                                 <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#333' }}>
-                                    PM2.5 and Organic Carbon Data (2006–2023)
+                                    PM2.5 (2006–2023)
                                 </Typography>
                                 <Typography variant="body2" paragraph>
                                     From EPA's Air Quality System (AQS) network.
-                                    Includes daily PM2.5 and every-three-day OC data from 344 long-term monitoring stations.
+                                    Includes daily PM2.5 data from long-term monitoring stations.
                                     Non-representative days and certain method codes excluded per EPA guidance.
                                 </Typography>
                             </CardContent>
@@ -223,7 +223,7 @@ function Methodology() {
                                 </Typography>
                                 <Typography variant="body2" paragraph>
                                     From CDC county-level estimates.
-                                    Used for calculating Years of Life Lost (YLL) metrics.
+                                    Used for calculating Years of Life Lost metrics.
                                     Provides demographic context for health impact assessments.
                                 </Typography>
                             </CardContent>
@@ -296,7 +296,7 @@ function Methodology() {
                                     Health Impact Calculations
                                 </Typography>
                                 <Typography variant="body2" paragraph>
-                                    We calculate excess mortality and Years of Life Lost (YLL) using concentration-response functions
+                                    We calculate excess mortality and Years of Life Lost using concentration-response functions
                                     and risk ratios from established research. Methods include GEMM and binned Poisson models.
                                     See supporting papers for detailed information.
                                 </Typography>
@@ -330,10 +330,10 @@ function Methodology() {
                                                 Where HR = Hazard Ratio from concentration-response function
                                             </Typography>
                                             <Typography variant="body2" sx={{ mb: 1, mt: 2, fontWeight: 600, fontSize: '0.9rem' }}>
-                                                YLL Formula:
+                                                Years of Life Lost Formula:
                                             </Typography>
                                             <Typography variant="body2" sx={{ mb: 0.5 }}>
-                                                YLL = Excess Mortality × Life Expectancy at Death
+                                                Years of Life Lost = Excess Mortality × Life Expectancy at Death
                                             </Typography>
                                         </Box>
                                     </AccordionDetails>
@@ -590,7 +590,7 @@ function Methodology() {
                             >
                                 <MenuItem value="pm25">PM₂.₅ Data</MenuItem>
                                 <MenuItem value="mortality">Excess Mortality</MenuItem>
-                                <MenuItem value="yll">Years of Life Lost (YLL)</MenuItem>
+                                <MenuItem value="yll">Years of Life Lost</MenuItem>
                             </Select>
                         </FormControl>
                     </Grid>

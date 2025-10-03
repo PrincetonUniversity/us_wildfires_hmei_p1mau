@@ -19,7 +19,7 @@ const Legend = ({ activeLayer }) => {
       };
     } else {
       return {
-        title: 'Fire PM2.5 (µg/m³)',
+        title: 'Smoke PM2.5 (µg/m³)',
         colors: [
           { color: '#fff7bc', label: '0 µg/m³' },
           { color: '#fee391', label: '0.5 µg/m³' },

@@ -119,18 +119,27 @@ function CountyBarChartContent({ data, timeScale, zoomed, containerWidth }) {
     ];
   }
 
-  // Custom shape for daily bars: AQI color fill, black border if fire > 0
+  // Custom shape for daily bars: AQI color fill, black dots at bottom if fire > 0
   const CustomTotalBarShape = (props) => {
     const { payload, ...rest } = props;
     const hasFire = payload.fire > 0;
     const aqiInfo = pm25ToAqiInfo(payload.total);
+
     return (
-      <Rectangle
-        {...rest}
-        fill={aqiInfo.color}
-        stroke={hasFire ? '#000' : 'none'}
-        strokeWidth={hasFire ? 1 : 0}
-      />
+      <g>
+        <Rectangle
+          {...rest}
+          fill={aqiInfo.color}
+        />
+        {hasFire && (
+          <circle
+            cx={rest.x + rest.width / 2}
+            cy={rest.y + rest.height - 2}
+            r={2}
+            fill="#000"
+          />
+        )}
+      </g>
     );
   };
 
@@ -148,6 +157,19 @@ function CountyBarChartContent({ data, timeScale, zoomed, containerWidth }) {
       const fire = typeof data.fire === 'number' ? data.fire : 0;
       const nonFire = typeof data.nonFire === 'number' ? data.nonFire : 0;
       const aqiInfo = pm25ToAqiInfo(total);
+
+      // Create a darker version of the AQI color for better readability
+      const getReadableColor = (color) => {
+        // Only for yellow and very light colors that are hard to read on white
+        if (color === '#ffff00' || color === '#fff7bc' || color === '#fee391' ||
+          color === '#fec44f' || color === '#fe9929' || color === '#ec7014') {
+          return '#8B4513'; // Saddle brown - much darker and more readable
+        }
+        return color;
+      };
+
+      const readableAqiColor = getReadableColor(aqiInfo.color);
+
       return (
         <div style={{
           backgroundColor: 'white',
@@ -161,19 +183,33 @@ function CountyBarChartContent({ data, timeScale, zoomed, containerWidth }) {
             <span style={{ fontWeight: 500 }}>Total PM2.5:</span> {total?.toFixed(2)} µg/m³
           </p>
           <p style={{ margin: 0 }}>
-            <span style={{ color: '#ffb74d', fontWeight: 500 }}>Fire:</span> {fire?.toFixed(2)} µg/m³
+            <span style={{ color: '#ffb74d', fontWeight: 500 }}>Smoke:</span> {fire?.toFixed(2)} µg/m³
             {fire > 0 && <span style={{ color: '#000', marginLeft: 4 }}>(smoke impacted)</span>}
           </p>
           <p style={{ margin: 0 }}>
-            <span style={{ color: '#90caf9', fontWeight: 500 }}>Non-Fire:</span> {nonFire?.toFixed(2)} µg/m³
+            <span style={{ color: '#000', fontWeight: 500 }}>Non-Smoke:</span> {nonFire?.toFixed(2)} µg/m³
           </p>
-          <p style={{ margin: 0, fontWeight: 'bold', color: aqiInfo.color }}>
+          <p style={{ margin: 0, fontWeight: 'bold', color: readableAqiColor }}>
             AQI: {aqiInfo.aqi} ({aqiInfo.category})
           </p>
         </div>
       );
     } else {
       const total = (payload[0]?.value || 0) + (payload[1]?.value || 0);
+      const aqiInfo = pm25ToAqiInfo(total);
+
+      // Create a darker version of the AQI color for better readability
+      const getReadableColor = (color) => {
+        // Only for yellow and very light colors that are hard to read on white
+        if (color === '#ffff00' || color === '#fff7bc' || color === '#fee391' ||
+          color === '#fec44f' || color === '#fe9929' || color === '#ec7014') {
+          return '#8B4513'; // Saddle brown - much darker and more readable
+        }
+        return color;
+      };
+
+      const readableAqiColor = getReadableColor(aqiInfo.color);
+
       return (
         <div style={{
           backgroundColor: 'white',
@@ -183,14 +219,17 @@ function CountyBarChartContent({ data, timeScale, zoomed, containerWidth }) {
           fontSize: '12px'
         }}>
           <p style={{ margin: 0, fontWeight: 'bold' }}>{timeScale === 'yearly' ? `Year ${dateLabel}` : dateLabel}</p>
-          <p style={{ margin: 0, color: payload[1]?.payload?.fireFill }}>
-            Fire PM2.5: {payload[1]?.value?.toFixed(2)} µg/m³
+          <p style={{ margin: 0, color: '#000' }}>
+            Smoke PM2.5: {payload[1]?.value?.toFixed(2)} µg/m³
           </p>
-          <p style={{ margin: 0, color: payload[0]?.payload?.nonFireFill }}>
-            Non-Fire PM2.5: {payload[0]?.value?.toFixed(2)} µg/m³
+          <p style={{ margin: 0, color: '#000' }}>
+            Non-Smoke PM2.5: {payload[0]?.value?.toFixed(2)} µg/m³
           </p>
           <p style={{ margin: 0, fontWeight: 'bold' }}>
             Total: {total.toFixed(2)} µg/m³
+          </p>
+          <p style={{ margin: 0, fontWeight: 'bold', color: readableAqiColor }}>
+            AQI: {aqiInfo.aqi} ({aqiInfo.category})
           </p>
         </div>
       );
@@ -236,29 +275,17 @@ function CountyBarChartContent({ data, timeScale, zoomed, containerWidth }) {
               wrapperStyle={{ fontSize: 9 }}
               content={() => (
                 <div style={{ textAlign: 'left', fontSize: 9, marginTop: 0 }}>
-                  <span style={{ marginRight: 15 }}>
-                    <span style={{
-                      display: 'inline-block',
-                      width: 12,
-                      height: 12,
-                      backgroundColor: '#888',
-                      marginRight: 4,
-                      verticalAlign: 'middle',
-                      border: '2px solid #000'
-                    }}></span>
-                    Smoke-impacted day
-                  </span>
                   <span>
                     <span style={{
                       display: 'inline-block',
-                      width: 12,
-                      height: 12,
-                      backgroundColor: '#888',
+                      width: 4,
+                      height: 4,
+                      backgroundColor: '#000',
+                      borderRadius: '50%',
                       marginRight: 4,
-                      verticalAlign: 'middle',
-                      border: '2px solid transparent'
+                      verticalAlign: 'middle'
                     }}></span>
-                    Non-smoke day
+                    Smoke-impacted day
                   </span>
                 </div>
               )}
@@ -277,14 +304,14 @@ function CountyBarChartContent({ data, timeScale, zoomed, containerWidth }) {
               <Bar
                 dataKey="nonFire"
                 stackId="a"
-                name="Non-Fire PM2.5"
+                name="Non-Smoke PM2.5"
                 fill={COLORS.nonFire}
                 shape={(props) => <CustomBarShape {...props} fillKey="nonFireFill" />}
               />
               <Bar
                 dataKey="fire"
                 stackId="a"
-                name="Fire PM2.5"
+                name="Smoke PM2.5"
                 isAnimationActive={false}
                 fill={COLORS.fire}
                 shape={(props) => <CustomBarShape {...props} fillKey="fireFill" />}
@@ -376,7 +403,7 @@ function CountyBarChartContent({ data, timeScale, zoomed, containerWidth }) {
       {isDailyChart && pieData && (
         <>
           <div style={{ fontSize: zoomed ? 22 : 16, margin: zoomed ? '24px 0 12px 0' : '16px 0 8px 0', textAlign: 'left', fontWeight: 600, width: '100%' }}>
-            <span style={{ color: '#ffb74d', fontWeight: 700 }}>Fire</span> vs <span style={{ color: '#90caf9', fontWeight: 700 }}>Non-Fire</span> PM2.5
+            <span style={{ color: '#ffb74d', fontWeight: 700 }}>Smoke</span> vs <span style={{ color: '#90caf9', fontWeight: 700 }}>Non-Smoke</span> PM2.5
           </div>
           <div style={{ width: '100%', margin: '0 auto', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'visible' }}>
             <PieChart width={pieWidth} height={pieHeight} style={{ width: '100%', height: pieHeight, maxWidth: zoomed ? 350 : 220, margin: '0 auto', overflow: 'visible' }}>

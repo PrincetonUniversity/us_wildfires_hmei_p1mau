@@ -43,14 +43,13 @@ const LayerTimeControls = ({
     // PM2.5 sub-options
     const pm25SubOptions = [
         { value: 'total', label: 'Total' },
-        { value: 'fire', label: 'Fire' },
-        { value: 'nonfire', label: 'Non-fire' },
+        { value: 'fire', label: 'Smoke' },
+        { value: 'nonfire', label: 'Non-smoke' },
     ];
     // Health options
     const healthOptions = [
         { value: 'mortality', label: 'Mortality' },
-        { value: 'yll', label: 'YLL' },
-        { value: 'population', label: 'Population' },
+        { value: 'yll', label: 'Years of Life Lost' },
     ];
 
     // Years for dropdown
@@ -64,8 +63,8 @@ const LayerTimeControls = ({
     // Health sub-options for mortality
     const mortalitySubOptions = [
         { value: 'total', label: 'Total' },
-        { value: 'fire', label: 'Fire' },
-        { value: 'nonfire', label: 'Non-fire' },
+        { value: 'fire', label: 'Smoke' },
+        { value: 'nonfire', label: 'Non-smoke' },
     ];
 
     if (showTimeControls === true) {
@@ -76,7 +75,7 @@ const LayerTimeControls = ({
                     Time Controls
                 </Typography>
                 {['mortality', 'yll', 'population'].includes(activeLayer) ? (
-                    // Only show year dropdown for mortality/YLL/population
+                    // Only show year dropdown for mortality/Years of Life Lost/population
                     <FormControl size="small" sx={{ mb: 0.5 }}>
                         <InputLabel id="year-label">Year</InputLabel>
                         <Select
@@ -226,62 +225,64 @@ const LayerTimeControls = ({
                     </Box>
                 </Box>
                 {/* Health Section */}
-                <Box sx={{ mb: 1.1 }}>
-                    <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.4, fontSize: '0.98em' }}>
-                        Health Metrics
-                    </Typography>
-                    <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
-                        {healthOptions.map(opt => (
-                            <Button
-                                key={opt.value}
-                                size="small"
-                                className={activeLayer === opt.value ? 'health-metric-active' : 'health-metric-inactive'}
-                                sx={{
-                                    ...pillStyle,
-                                    bgcolor: activeLayer === opt.value ? '#dc004e' : 'white',
-                                    color: activeLayer === opt.value ? 'white' : '#dc004e',
-                                    borderColor: '#dc004e',
-                                    '&:hover': {
-                                        bgcolor: activeLayer === opt.value ? '#a7003a' : '#ff6b9d',
-                                        color: 'white'
-                                    }
-                                }}
-                                onClick={() => setActiveLayer(opt.value)}
-                            >
-                                {opt.label}
-                            </Button>
-                        ))}
-                    </ButtonGroup>
-                    {/* Mortality sub-metric selector: show directly below the mortality pill, no heading */}
-                    {activeLayer === 'mortality' && (
-                        <Box sx={{ mt: 0.2, display: 'block' }}>
-                            <ButtonGroup variant="outlined" size="small" sx={{ display: 'inline-flex' }}>
-                                {mortalitySubOptions.map(opt => (
-                                    <Button
-                                        key={opt.value}
-                                        size="small"
-                                        sx={{
-                                            ...pillStyle,
-                                            bgcolor: mortalitySubMetric === opt.value ? '#d32f2f' : 'white',
-                                            color: mortalitySubMetric === opt.value ? 'white' : '#d32f2f',
-                                            borderColor: '#d32f2f',
-                                            px: 1,
-                                            py: 0.2,
-                                            m: 0.1,
-                                            '&:hover': {
-                                                bgcolor: mortalitySubMetric === opt.value ? '#b71c1c' : '#ffcdd2',
-                                                color: 'white'
-                                            }
-                                        }}
-                                        onClick={() => setMortalitySubMetric(opt.value)}
-                                    >
-                                        {opt.label}
-                                    </Button>
-                                ))}
-                            </ButtonGroup>
-                        </Box>
-                    )}
-                </Box>
+                {false && ( // TODO: Remove this once health metrics are added
+                    <Box sx={{ mb: 1.1 }}>
+                        <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.4, fontSize: '0.98em' }}>
+                            Health Metrics
+                        </Typography>
+                        <ButtonGroup variant="outlined" size="small" sx={{ flexWrap: 'wrap' }}>
+                            {healthOptions.map(opt => (
+                                <Button
+                                    key={opt.value}
+                                    size="small"
+                                    className={activeLayer === opt.value ? 'health-metric-active' : 'health-metric-inactive'}
+                                    sx={{
+                                        ...pillStyle,
+                                        bgcolor: activeLayer === opt.value ? '#dc004e' : 'white',
+                                        color: activeLayer === opt.value ? 'white' : '#dc004e',
+                                        borderColor: '#dc004e',
+                                        '&:hover': {
+                                            bgcolor: activeLayer === opt.value ? '#a7003a' : '#ff6b9d',
+                                            color: 'white'
+                                        }
+                                    }}
+                                    onClick={() => setActiveLayer(opt.value)}
+                                >
+                                    {opt.label}
+                                </Button>
+                            ))}
+                        </ButtonGroup>
+                        {/* Mortality sub-metric selector: show directly below the mortality pill, no heading */}
+                        {activeLayer === 'mortality' && (
+                            <Box sx={{ mt: 0.2, display: 'block' }}>
+                                <ButtonGroup variant="outlined" size="small" sx={{ display: 'inline-flex' }}>
+                                    {mortalitySubOptions.map(opt => (
+                                        <Button
+                                            key={opt.value}
+                                            size="small"
+                                            sx={{
+                                                ...pillStyle,
+                                                bgcolor: mortalitySubMetric === opt.value ? '#d32f2f' : 'white',
+                                                color: mortalitySubMetric === opt.value ? 'white' : '#d32f2f',
+                                                borderColor: '#d32f2f',
+                                                px: 1,
+                                                py: 0.2,
+                                                m: 0.1,
+                                                '&:hover': {
+                                                    bgcolor: mortalitySubMetric === opt.value ? '#b71c1c' : '#ffcdd2',
+                                                    color: 'white'
+                                                }
+                                            }}
+                                            onClick={() => setMortalitySubMetric(opt.value)}
+                                        >
+                                            {opt.label}
+                                        </Button>
+                                    ))}
+                                </ButtonGroup>
+                            </Box>
+                        )}
+                    </Box>
+                )}
                 {/* Regulatory Support / Exceedance Category Section */}
                 <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.4, fontSize: '0.98em' }}>
                     Exceedance Categories (2021-2023 Average)

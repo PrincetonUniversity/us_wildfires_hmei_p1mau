@@ -43,7 +43,7 @@ export const createPopup = (feature, lngLat, map) => {
   }
 
   if (properties.fire_pm25 !== undefined) {
-    addDataRow('Fire PM2.5:', properties.fire_pm25.toFixed(2), ' µg/m³');
+    addDataRow('Smoke PM2.5:', properties.fire_pm25.toFixed(2), ' µg/m³');
   }
 
   if (properties.fire_pm25_pct !== undefined) {

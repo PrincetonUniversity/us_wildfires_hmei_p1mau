@@ -194,12 +194,12 @@ function App() {
             fontFamily="Inter, Roboto, Helvetica Neue, sans-serif"
             letterSpacing={0.5}
           >
-            PM2.5 Wildfire Impact Map
+            PM2.5 Wildfire Smoke Impact Map
           </Typography>
         </DialogTitle>
         <DialogContent>
           <Typography textAlign="center" variant="body1" >
-            Welcome! This tool allows you to explore the impact of PM2.5 pollution from wildfires across the United States using interactive maps and charts.
+            Welcome! This tool allows you to explore the impact of PM2.5 pollution from wildfire smoke across the United States using interactive maps and charts.
           </Typography>
         </DialogContent>
         <DialogContent>
