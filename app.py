@@ -49,7 +49,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Cache configuration
-CACHE_TTL = 300  # 5 minutes
+CACHE_TTL = 3600  # 1 hour (data rarely changes)
 executor = ThreadPoolExecutor(max_workers=4)
 
 # Load county geometries once at startup
@@ -57,7 +57,7 @@ COUNTY_GEOMETRIES = None
 
 # Simple in-memory cache for choropleth data
 CHOROPLETH_CACHE = {}
-CACHE_MAX_SIZE = 100  # Maximum number of cached responses
+CACHE_MAX_SIZE = 500  # Maximum number of cached responses (increased from 100)
 
 
 def load_county_geometries():
@@ -503,14 +503,19 @@ def build_choropleth_query(db, time_scale, year, month, season, summary_model):
     return query
 
 
-def build_geojson_features(results, value_func):
+def build_geojson_features(results, value_func, include_geometry=False):
+    """
+    Build GeoJSON features from query results.
+
+    Args:
+        results: Query results
+        value_func: Function to extract the value from a row
+        include_geometry: If True, include geometry in the response. Default False for performance.
+    """
     features = []
     for row in results:
-        if not row.geometry:
-            continue
         feature = {
             "type": "Feature",
-            "geometry": row.geometry,
             "properties": {
                 "fips": row.fips,
                 "county_name": row.county_name,
@@ -527,6 +532,9 @@ def build_geojson_features(results, value_func):
                 "population": int(row.population) if row.population is not None else 0
             }
         }
+        # Only include geometry if explicitly requested
+        if include_geometry and row.geometry:
+            feature["geometry"] = row.geometry
         features.append(feature)
     return features
 
@@ -534,6 +542,41 @@ def build_geojson_features(results, value_func):
 # --- New Modular Endpoints ---
 choropleth_router = APIRouter(
     prefix="/api/counties/choropleth", tags=["Choropleth"])
+
+
+@choropleth_router.get("/geometries")
+async def get_county_geometries():
+    """
+    Return county geometries for client-side caching.
+    This should be called once on app load and cached on the frontend.
+    Returns a GeoJSON FeatureCollection with just FIPS and geometry.
+    """
+    if not COUNTY_GEOMETRIES:
+        raise HTTPException(
+            status_code=500, detail="County geometries not loaded")
+
+    features = []
+    for fips, geometry in COUNTY_GEOMETRIES.items():
+        # Skip Alaska and Puerto Rico
+        if fips.startswith('02') or fips.startswith('72'):
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": geometry,
+            "properties": {
+                "fips": fips
+            }
+        })
+
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "metadata": {
+            "description": "County geometries for client-side rendering",
+            "feature_count": len(features)
+        }
+    }
+
 
 # Add a helper to sanitize float values for JSON
 
@@ -647,9 +690,6 @@ async def get_choropleth_mortality(
 
         features = []
         for row in results:
-            if not row.geometry:
-                continue
-
             # Get the excess value based on sub_metric, with safe conversion
             if sub_metric == "total":
                 excess = safe_float(row.total_excess)
@@ -673,7 +713,6 @@ async def get_choropleth_mortality(
 
             feature = {
                 "type": "Feature",
-                "geometry": row.geometry,
                 "properties": {
                     "fips": row.fips,
                     "county_name": row.county_name,
@@ -893,9 +932,6 @@ async def get_choropleth_population(
         features = []
 
         for row in results:
-            if not row.geometry:
-                continue
-
             pop = row.population or 0
 
             # Ensure valid number
@@ -904,7 +940,6 @@ async def get_choropleth_population(
 
             feature = {
                 "type": "Feature",
-                "geometry": row.geometry,
                 "properties": {
                     "fips": row.fips,
                     "county_name": row.county_name,
@@ -986,9 +1021,6 @@ async def get_choropleth_yll(
 
         features = []
         for row in results:
-            if not row.geometry:
-                continue
-
             # Get the YLL value based on sub_metric, with safe conversion
             if sub_metric == "total":
                 yll_value = safe_float(row.yll_total)
@@ -1012,7 +1044,6 @@ async def get_choropleth_yll(
 
             feature = {
                 "type": "Feature",
-                "geometry": row.geometry,
                 "properties": {
                     "fips": row.fips,
                     "county_name": row.county_name,
@@ -1519,7 +1550,6 @@ def get_exceedance_summary(db: Session = Depends(get_db)):
         for row in results:
             features.append({
                 "type": "Feature",
-                "geometry": row.geometry,
                 "properties": {
                     "fips": row.fips,
                     "county_name": row.name,

@@ -206,7 +206,12 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty, sidebarWidth =
                 <Box sx={{ mt: 1, pt: 0, pb: 1, px: 1, background: '#f7f8fa', borderRadius: 1, border: '1px solid #e0e4ea', minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }} className="chart-container">
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
                         <Typography variant="subtitle2" fontWeight="bold" sx={{ fontSize: '1em' }}>
-                            {activeLayer === 'mortality' ? 'Excess Mortality Bar Chart' : activeLayer === 'yll' ? 'Years of Life Lost Bar Chart' : 'PM2.5 Bar Chart'}
+                            {activeLayer === 'mortality' ? 'Annual Excess Mortality' :
+                             activeLayer === 'yll' ? 'Annual Years of Life Lost' :
+                             timeScale === 'yearly' ? 'Annual PM2.5 Concentrations' :
+                             timeScale === 'monthly' ? 'Daily PM2.5 Concentrations' :
+                             timeScale === 'seasonal' ? 'Daily PM2.5 Concentrations' :
+                             'PM2.5 Concentrations'}
                         </Typography>
                         <button
                             onClick={() => handleChartExpand('pm25')}

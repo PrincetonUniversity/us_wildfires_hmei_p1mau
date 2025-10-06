@@ -172,8 +172,13 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
   const [choroplethData, setChoroplethData] = useState(null);
   const [stateData, setStateData] = useState(null);
   const [decompositionPM25Type, setDecompositionPM25Type] = useState("total");
+  const [uniformScale, setUniformScale] = useState(null); // Uniform scale for current metric/year
   const currentCountyRef = useRef(null);
   const fetchTimeoutRef = useRef(null);
+  const dataCache = useRef({}); // Client-side cache for choropleth data
+  const scaleCache = useRef({}); // Cache for uniform color scales across submetrics
+  const geometryCache = useRef(null); // Cache for county geometries (fetched once)
+  const geometryLoadingRef = useRef(false); // Track if geometries are being loaded
 
 
 
@@ -265,22 +270,27 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
   // Destructure time controls
   const { timeScale, year, month, season } = timeControls;
 
-  // Determine metric and subMetric from new props
-  let metric = 'average';
-  let subMetric = 'total';
-  if (PM25_LAYERS.includes(activeLayer)) {
-    metric = activeLayer;
-    if (pm25SubLayer) subMetric = pm25SubLayer;
-  } else if (HEALTH_LAYERS.includes(activeLayer)) {
-    metric = activeLayer;
-    if (activeLayer === 'mortality') {
-      subMetric = timeControls.subMetric || 'total';
-    } else if (activeLayer === 'yll') {
-      subMetric = timeControls.subMetric || 'total';
-    } else {
-      subMetric = 'total';
+  // Determine metric and subMetric from new props using useMemo
+  const metric = useMemo(() => {
+    if (PM25_LAYERS.includes(activeLayer)) {
+      return activeLayer;
+    } else if (HEALTH_LAYERS.includes(activeLayer)) {
+      return activeLayer;
     }
-  }
+    return 'average';
+  }, [activeLayer]);
+
+  const subMetric = useMemo(() => {
+    if (PM25_LAYERS.includes(activeLayer)) {
+      return pm25SubLayer || 'total';
+    } else if (HEALTH_LAYERS.includes(activeLayer)) {
+      if (activeLayer === 'mortality' || activeLayer === 'yll') {
+        return timeControls.subMetric || 'total';
+      }
+      return 'total';
+    }
+    return 'total';
+  }, [activeLayer, pm25SubLayer, timeControls.subMetric]);
 
   // Debounced fetch function to prevent rapid successive calls
   const debouncedFetchChoroplethData = useCallback(() => {
@@ -290,8 +300,56 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
 
     fetchTimeoutRef.current = setTimeout(async () => {
       await fetchChoroplethData();
-    }, 300); // 300ms debounce
+    }, 50); // 50ms debounce for faster response
   }, [activeLayer, timeScale, year, month, season, pm25SubLayer, selectedAgeGroups, subMetric]);
+
+  // Function to fetch county geometries once (called on app load)
+  const fetchCountyGeometries = useCallback(async () => {
+    if (geometryCache.current) {
+      console.log('Using cached geometries:', Object.keys(geometryCache.current).length, 'counties');
+      return geometryCache.current; // Already cached
+    }
+
+    // If already loading, wait for it
+    if (geometryLoadingRef.current) {
+      console.log('Geometries are already being loaded, waiting...');
+      // Wait for the loading to complete
+      while (geometryLoadingRef.current) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      return geometryCache.current || {};
+    }
+
+    console.log('Fetching county geometries for the first time...');
+    geometryLoadingRef.current = true;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/counties/choropleth/geometries`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+
+      // Create an object of FIPS -> geometry for fast lookup
+      const geometryMap = {};
+      if (data && data.features) {
+        data.features.forEach(feature => {
+          if (feature.properties && feature.properties.fips && feature.geometry) {
+            geometryMap[feature.properties.fips] = feature.geometry;
+          }
+        });
+        console.log('Loaded geometries for', Object.keys(geometryMap).length, 'counties');
+      }
+
+      geometryCache.current = geometryMap;
+      return geometryMap;
+    } catch (error) {
+      console.error('Error fetching county geometries:', error);
+      return {};
+    } finally {
+      geometryLoadingRef.current = false;
+    }
+  }, []);
 
   // Function to fetch state data
   const fetchStateData = useCallback(async () => {
@@ -309,12 +367,139 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
     }
   }, []);
 
+  // Function to fetch all submetrics and calculate uniform scale
+  const fetchUniformScale = useCallback(async (metricType, timeParams) => {
+    // Create a cache key based on metric type and time parameters
+    const cacheKey = `${metricType}_${JSON.stringify(timeParams)}`;
+
+    // Return cached scale if available
+    if (scaleCache.current[cacheKey]) {
+      console.log('Using cached uniform scale for', cacheKey);
+      return scaleCache.current[cacheKey];
+    }
+
+    try {
+      console.log('Fetching uniform scale for', metricType, timeParams);
+
+      // Fetch all three submetrics (total, fire, nonfire)
+      const subMetrics = ['total', 'fire', 'nonfire'];
+      const promises = subMetrics.map(async (sub) => {
+        const params = new URLSearchParams(timeParams);
+        const endpoint = `/api/counties/choropleth/${metricType}`;
+        const url = `${API_BASE_URL}${endpoint}?${params}`;
+
+        // Check cache first
+        if (dataCache.current[url]) {
+          return dataCache.current[url];
+        }
+
+        const response = await fetch(url);
+        if (!response.ok) return null;
+        return await response.json();
+      });
+
+      const results = await Promise.all(promises);
+
+      // Collect all values across all submetrics
+      let allValues = [];
+      results.forEach(data => {
+        if (data && data.features) {
+          // Determine the property name based on metric type and submetric
+          data.features.forEach(feature => {
+            const props = feature.properties;
+            // Collect all relevant property values (total, fire, nonfire)
+            if (metricType === 'average') {
+              if (props.avg_total) allValues.push(props.avg_total);
+              if (props.avg_fire) allValues.push(props.avg_fire);
+              if (props.avg_nonfire) allValues.push(props.avg_nonfire);
+            } else if (metricType === 'max') {
+              if (props.max_total) allValues.push(props.max_total);
+              if (props.max_fire) allValues.push(props.max_fire);
+              if (props.max_nonfire) allValues.push(props.max_nonfire);
+            } else if (metricType === 'pop_weighted') {
+              if (props.pop_weighted_total) allValues.push(props.pop_weighted_total);
+              if (props.pop_weighted_fire) allValues.push(props.pop_weighted_fire);
+              if (props.pop_weighted_nonfire) allValues.push(props.pop_weighted_nonfire);
+            }
+          });
+        }
+      });
+
+      // Filter valid values
+      allValues = allValues.filter(v => typeof v === 'number' && isFinite(v) && v > 0);
+
+      if (allValues.length === 0) {
+        console.log('No valid values found for uniform scale');
+        return null;
+      }
+
+      const min = Math.min(...allValues);
+      const max = Math.max(...allValues);
+
+      // Create evenly spaced color scale with PM2.5 colors (yellow-orange-red)
+      const range = max - min;
+      const step = range / 5;
+      const colors = ['#fff7bc', '#fee391', '#fec44f', '#fe9929', '#ec7014', '#cc4c02'];
+      const colorScale = [];
+
+      for (let i = 0; i < colors.length; i++) {
+        let value;
+        if (i === 0) value = min;
+        else if (i === colors.length - 1) value = max;
+        else value = min + step * i;
+
+        // Ensure strictly increasing
+        if (colorScale.length > 0 && value <= colorScale[colorScale.length - 1][0]) {
+          value = colorScale[colorScale.length - 1][0] + 0.0001;
+        }
+        colorScale.push([value, colors[i]]);
+      }
+
+      // Cache the result
+      scaleCache.current[cacheKey] = colorScale;
+      console.log('Calculated uniform scale:', colorScale);
+
+      return colorScale;
+    } catch (error) {
+      console.error('Error fetching uniform scale:', error);
+      return null;
+    }
+  }, []);
+
+  // Fetch uniform scale when metric or time changes (for PM2.5 layers only)
+  useEffect(() => {
+    if (!PM25_LAYERS.includes(activeLayer)) {
+      setUniformScale(null); // Clear scale for non-PM2.5 layers
+      return;
+    }
+
+    const fetchScale = async () => {
+      const timeParams = {};
+      if (timeScale === 'yearly') {
+        timeParams.time_scale = 'yearly';
+        timeParams.year = year;
+      } else if (timeScale === 'monthly') {
+        timeParams.time_scale = 'monthly';
+        timeParams.year = year;
+        timeParams.month = month;
+      } else if (timeScale === 'seasonal') {
+        timeParams.time_scale = 'seasonal';
+        timeParams.year = year;
+        timeParams.season = season;
+      }
+
+      const scale = await fetchUniformScale(activeLayer, timeParams);
+      setUniformScale(scale);
+    };
+
+    fetchScale();
+  }, [activeLayer, timeScale, year, month, season, fetchUniformScale]);
+
   // Function to fetch choropleth data
   const fetchChoroplethData = useCallback(async () => {
     if (!PM25_LAYERS.includes(activeLayer) && !HEALTH_LAYERS.includes(activeLayer) && !EXCEEDANCE_LAYERS.includes(activeLayer)) return;
 
     try {
-      setLoading(true);
       let endpoint = '/api/counties/choropleth/average';
       let url = '';
 
@@ -368,13 +553,72 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
       }
 
       if (url) {
+        // Fetch geometries first (always needed)
+        const geometries = await fetchCountyGeometries();
+
+        // Check cache for property data only (without geometries)
+        const cacheKey = url;
+        const cached = dataCache.current[cacheKey];
+
+        if (cached) {
+          console.log('Using cached data for:', url);
+          // Even cached data needs geometries merged
+          const mergedFeatures = cached.features.map(feature => {
+            const fips = feature.properties.fips || feature.properties.GEOID || feature.properties.FIPS;
+            const geometry = geometries[fips];
+            return {
+              ...feature,
+              geometry: geometry || null
+            };
+          });
+
+          const mergedData = {
+            ...cached,
+            features: mergedFeatures
+          };
+
+          setLoading(false);
+          setChoroplethData(mergedData);
+          updateLegend();
+          return;
+        }
+
+        console.log('Fetching new data for:', url);
+        setLoading(true);
         const response = await fetch(url);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
+
         if (data && data.features) {
-          setChoroplethData(data);
+          // Cache the property data without geometries
+          const cacheKeys = Object.keys(dataCache.current);
+          if (cacheKeys.length > 50) {
+            delete dataCache.current[cacheKeys[0]];
+          }
+          dataCache.current[cacheKey] = data;
+
+          // Merge geometries with properties for display
+          const mergedFeatures = data.features.map(feature => {
+            const fips = feature.properties.fips || feature.properties.GEOID || feature.properties.FIPS;
+            const geometry = geometries[fips];
+
+            return {
+              ...feature,
+              geometry: geometry || null // Add geometry from cache
+            };
+          });
+
+          const featuresWithGeometry = mergedFeatures.filter(f => f.geometry !== null).length;
+          console.log(`Merged ${featuresWithGeometry}/${mergedFeatures.length} features have geometry`);
+
+          const mergedData = {
+            ...data,
+            features: mergedFeatures
+          };
+
+          setChoroplethData(mergedData);
           updateLegend();
         }
       }
@@ -830,6 +1074,9 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
       // Load state outlines
       loadStateOutlines();
 
+      // Fetch geometries once on startup
+      fetchCountyGeometries();
+
       fetchChoroplethData();
       // Initial adjustment of map bounds
       setTimeout(() => adjustMapBounds(), 100);
@@ -841,7 +1088,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
       closeOnClick: false,
       maxWidth: 'none'
     });
-    // Cleanup - remove the map on every re-render
+    // Cleanup - remove the map only on unmount
     return () => {
       if (map.current) {
         if (map.current.loaded()) {
@@ -854,7 +1101,7 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
         map.current = null;
       }
     };
-  }, [activeLayer, pm25SubLayer]); // Reload map when layer changes
+  }, []); // Only run once on mount
 
   // Helper function to get color scale based on metric
   const getColorScale = (data = null) => {
@@ -920,6 +1167,12 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
       return EXCEEDANCE_COLORS;
     }
 
+    // For PM2.5 layers, use uniform scale if available (consistent across submetrics)
+    if (PM25_LAYERS.includes(activeLayer) && uniformScale) {
+      console.log('Using uniform scale for', activeLayer);
+      return uniformScale;
+    }
+
     // If we have data, calculate dynamic scale for PM2.5 layers
     if (data) {
       return calculateDynamicColorScale(data, metric);
@@ -968,14 +1221,16 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
 
   // Update map layers when choroplethData, activeMetric, or subMetric changes
   useEffect(() => {
-    if (!choroplethData || !map.current || !map.current.isStyleLoaded()) {
+    if (!choroplethData || !map.current || !mapLoaded) {
+      console.log('Skipping map update:', {
+        hasChoroplethData: !!choroplethData,
+        hasMap: !!map.current,
+        mapLoaded: mapLoaded
+      });
       return;
     }
 
-    // Remove existing layer if it exists
-    if (map.current.getLayer('pm25-layer')) {
-      map.current.removeLayer('pm25-layer');
-    }
+    console.log('Updating map with', choroplethData.features.length, 'features for layer:', activeLayer);
 
     const mapInstance = map.current;
     let metricForColor;
@@ -987,14 +1242,15 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
       metricForColor = getMetricProperty();
     }
 
-
-
-
-
-
-    // Remove the layer if it exists
-    if (mapInstance.getLayer('pm25-layer')) {
-      mapInstance.removeLayer('pm25-layer');
+    // Verify data has the expected property - prevents black flicker during layer switches
+    if (choroplethData.features.length > 0) {
+      const hasExpectedProperty = choroplethData.features.some(f =>
+        f.properties && f.properties.hasOwnProperty(metricForColor)
+      );
+      if (!hasExpectedProperty) {
+        console.log('Data missing expected property:', metricForColor, '- waiting for correct data');
+        return; // Skip update until we have matching data
+      }
     }
 
     // Filter out Alaska (FIPS starting with 02) and Puerto Rico (FIPS starting with 72)
@@ -1006,40 +1262,62 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
       })
     };
 
-    // Always update the source with filtered data
-    if (!mapInstance.getSource('pm25')) {
+    console.log('Filtered data:', filteredData.features.length, 'features, with geometries:',
+      filteredData.features.filter(f => f.geometry).length);
+
+    // Check if source and layer exist
+    const sourceExists = mapInstance.getSource('pm25');
+    const layerExists = mapInstance.getLayer('pm25-layer');
+
+    console.log('Source exists:', !!sourceExists, 'Layer exists:', !!layerExists, 'Metric:', metricForColor);
+
+    // Add or update source
+    if (!sourceExists) {
+      console.log('Adding new source with', filteredData.features.length, 'features');
       mapInstance.addSource('pm25', {
         type: 'geojson',
         data: filteredData,
         generateId: true
       });
     } else {
+      console.log('Updating existing source with', filteredData.features.length, 'features');
       mapInstance.getSource('pm25').setData(filteredData);
     }
-    // Add the layer
-    const layerConfig = {
-      id: 'pm25-layer',
-      type: 'fill',
-      source: 'pm25',
-      paint: {
-        'fill-color': [
-          'interpolate',
-          ['linear'],
-          ['get', metricForColor],
-          ...getColorScale(choroplethData).reduce((acc, [value, color]) => acc.concat(value, color), [])
-        ],
-        'fill-opacity': 0.8,
-        'fill-outline-color': 'rgba(0,0,0,0.2)'
-      }
-    };
 
-    // Add the layer
-    mapInstance.addLayer(layerConfig, 'boundary_county');
+    // Only re-add layer if it doesn't exist, otherwise just update paint
+    if (!layerExists) {
+      const layerConfig = {
+        id: 'pm25-layer',
+        type: 'fill',
+        source: 'pm25',
+        paint: {
+          'fill-color': [
+            'interpolate',
+            ['linear'],
+            ['get', metricForColor],
+            ...getColorScale(choroplethData).reduce((acc, [value, color]) => acc.concat(value, color), [])
+          ],
+          'fill-opacity': 0.8,
+          'fill-outline-color': 'rgba(0,0,0,0.2)'
+        }
+      };
+      mapInstance.addLayer(layerConfig, 'boundary_county');
+      console.log('Added new layer');
+    } else {
+      // Just update the paint properties for better performance
+      console.log('Updating paint property for metric:', metricForColor);
+      mapInstance.setPaintProperty('pm25-layer', 'fill-color', [
+        'interpolate',
+        ['linear'],
+        ['get', metricForColor],
+        ...getColorScale(choroplethData).reduce((acc, [value, color]) => acc.concat(value, color), [])
+      ]);
+      console.log('Updated paint property');
+    }
 
     // Update the legend
     updateLegend();
-
-  }, [choroplethData, activeLayer, timeScale, year, month, season]);
+  }, [choroplethData, activeLayer, mapLoaded, uniformScale]);
 
   // Update mousemove handler to send county info to sidebar
   useEffect(() => {
@@ -1140,7 +1418,6 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
           if (popup.current) {
             let formattedValue;
             if (EXCEEDANCE_LAYERS.includes(activeLayer)) {
-              const meaning = categoryMeanings[value] || '';
               formattedValue = `${value}`;
             } else if (activeLayer === 'population') {
               formattedValue = value !== undefined ? value.toLocaleString() : 'N/A';
@@ -1389,7 +1666,6 @@ const Map = ({ stateAbbr, activeLayer, pm25SubLayer, timeControls, onCountySelec
       overflow: 'hidden'
     }}>
       <div
-        key={activeLayer + '-' + pm25SubLayer}
         ref={mapContainer}
         style={{
           position: 'absolute',

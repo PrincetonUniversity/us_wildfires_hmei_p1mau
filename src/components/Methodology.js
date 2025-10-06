@@ -189,12 +189,11 @@ function Methodology() {
                         <Card elevation={1} sx={{ height: '100%' }}>
                             <CardContent>
                                 <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#333' }}>
-                                    Model Simulations (GFDL AM4VR, 2021–2023)
+                                    Model Simulations (GFDL AM4VR)
                                 </Typography>
                                 <Typography variant="body2" paragraph>
                                     High-resolution simulations using satellite-based fire data.
                                     Provides additional validation and gap-filling for observational data.
-                                    Limited to recent years due to computational constraints.
                                 </Typography>
                             </CardContent>
                         </Card>
@@ -452,97 +451,22 @@ function Methodology() {
                 <Typography variant="h5" gutterBottom sx={{ fontWeight: 600, color: '#333' }}>
                     Literature
                 </Typography>
-                <Card elevation={1} sx={{ mb: 4, backgroundColor: '#f8f9fa' }}>
-                    <CardContent>
-                        <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#333' }}>
-                            This interface is part of an ongoing research paper
-                        </Typography>
-                        <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#333', fontSize: '1rem' }}>
-                            Tentative title:
-                        </Typography>
-                        <Typography variant="body1" paragraph sx={{ fontStyle: 'italic', mb: 2 }}>
-                            Improving estimates of wildfire smoke contributions to surface PM₂.₅ pollution to support US air quality management
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                            Yuanyu Xie, Denise L. Mauzerall, Meiyun Lin, Janiya Angoy, Bonne Ford, Jennifer McGinnis, Jeffrey R. Pierce, Larry W. Horowitz, Tianjia Liu, Mi Zhou, Beichen Lv, Hassan Khan
-                        </Typography>
-                    </CardContent>
-                </Card>
                 <Typography variant="body1" paragraph>
-                    This research builds upon the following key publications:
+                    This interface is related to the following publications:
                 </Typography>
 
                 <Grid container spacing={2}>
                     <Grid item xs={12}>
-                        <Card elevation={1} sx={{ mb: 2 }}>
+                        <Card elevation={1} sx={{ mb: 2, backgroundColor: '#f8f9fa' }}>
                             <CardContent>
                                 <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#333', fontSize: '1rem' }}>
-                                    <a href="https://www.pnas.org/doi/10.1073/pnas.1803222115" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>
-                                        Burnett, R., et al. (2018). Global estimates of mortality associated with long-term exposure to outdoor fine particulate matter.
-                                    </a>
+                                    Improving estimates of wildfire smoke contributions to surface PM₂.₅ pollution to support US air quality management
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary">
-                                    Proceedings of the National Academy of Sciences, 115(38), 9592-9597.
+                                <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                                    Tentative title (manuscript in preparation)
                                 </Typography>
-                            </CardContent>
-                        </Card>
-                    </Grid>
-
-                    <Grid item xs={12}>
-                        <Card elevation={1} sx={{ mb: 2 }}>
-                            <CardContent>
-                                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#333', fontSize: '1rem' }}>
-                                    <a href="https://www.pnas.org/doi/abs/10.1073/pnas.2403960121" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>
-                                        Ma, Y., et al. (2024). Long-term exposure to wildland fire smoke PM2.5 and mortality in the contiguous United States.
-                                    </a>
-                                </Typography>
-                                <Typography variant="body2" color="text.secondary">
-                                    Proceedings of the National Academy of Sciences, 121(40), e2403960121.
-                                </Typography>
-                            </CardContent>
-                        </Card>
-                    </Grid>
-
-                    <Grid item xs={12}>
-                        <Card elevation={1} sx={{ mb: 2 }}>
-                            <CardContent>
-                                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#333', fontSize: '1rem' }}>
-                                    <a href="https://eartharxiv.org/repository/view/6844/" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>
-                                        Qiu, M., et al. (2024). Wildfire smoke exposure and mortality burden in the US under future climate change.
-                                    </a>
-                                </Typography>
-                                <Typography variant="body2" color="text.secondary">
-                                    EarthArXiv preprint. https://eartharxiv.org/repository/view/6844/
-                                </Typography>
-                            </CardContent>
-                        </Card>
-                    </Grid>
-
-                    <Grid item xs={12}>
-                        <Card elevation={1} sx={{ mb: 2 }}>
-                            <CardContent>
-                                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#333', fontSize: '1rem' }}>
-                                    <a href="https://doi.org/10.1038/s41893-022-00976-8" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>
-                                        Yang, H., et al. (2022). Socio-demographic factors shaping the future global health burden from air pollution.
-                                    </a>
-                                </Typography>
-                                <Typography variant="body2" color="text.secondary">
-                                    Nature Sustainability, 5(12), 1047-1056. https://doi.org/10.1038/s41893-022-00976-8
-                                </Typography>
-                            </CardContent>
-                        </Card>
-                    </Grid>
-
-                    <Grid item xs={12}>
-                        <Card elevation={1}>
-                            <CardContent>
-                                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#333', fontSize: '1rem' }}>
-                                    <a href="https://pubmed.ncbi.nlm.nih.gov/37544309/" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>
-                                        GBD US Health Disparities Collaborators (2023). Cause-specific mortality by county, race, and ethnicity in the USA, 2000–19: a systematic analysis of health disparities.
-                                    </a>
-                                </Typography>
-                                <Typography variant="body2" color="text.secondary">
-                                    The Lancet, 402(10407), 1065-1082. doi: 10.1016/S0140-6736(23)01088-7
+                                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                                    Yuanyu Xie, Denise L. Mauzerall, Meiyun Lin, Janiya Angoy, Bonne Ford, Jennifer McGinnis, Jeffrey R. Pierce, Larry W. Horowitz, Tianjia Liu, Mi Zhou, Beichen Lv, Hassan Khan
                                 </Typography>
                             </CardContent>
                         </Card>
