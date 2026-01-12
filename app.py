@@ -6,6 +6,8 @@ import logging
 import warnings
 import os
 import math
+import csv
+from pathlib import Path
 from datetime import datetime, date
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -17,7 +19,7 @@ from fastapi import FastAPI, HTTPException, Query, Depends, status, BackgroundTa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy import func, and_, extract
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -298,7 +300,7 @@ async def preload_common_datasets():
 class DownloadRequest(BaseModel):
     name: str
     institution: str
-    email: EmailStr
+    email: str
     usage_description: str
     data_type: str  # 'pm25', 'mortality', or 'yll'
     time_scale: Optional[str] = 'yearly'  # 'daily', 'yearly', 'monthly', 'seasonal'
@@ -2069,9 +2071,6 @@ async def get_state_boundaries():
 
 def log_download_request_to_csv(request: DownloadRequest):
     """Log download request to a CSV file."""
-    import csv
-    from pathlib import Path
-
     try:
         # Create logs directory if it doesn't exist
         log_dir = Path("logs")
@@ -2147,13 +2146,28 @@ async def submit_download_request(request: DownloadRequest, background_tasks: Ba
 
 
 @app.get("/api/download-requests/export")
-async def export_download_requests():
+async def export_download_requests(api_key: str = Query(..., description="Admin API key")):
     """
     Export all download request logs as CSV.
-    Protected endpoint - only accessible to admins.
+    Protected endpoint - requires admin API key.
+
+    Usage: /api/download-requests/export?api_key=YOUR_ADMIN_API_KEY
     """
     try:
-        from pathlib import Path
+        # Check API key
+        admin_api_key = os.getenv("ADMIN_API_KEY")
+        if not admin_api_key:
+            raise HTTPException(
+                status_code=500,
+                detail="Admin API key not configured on server"
+            )
+
+        if api_key != admin_api_key:
+            logger.warning(f"Invalid API key attempt to access download logs")
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid API key"
+            )
 
         csv_file = Path("logs/download_requests.csv")
 
@@ -2167,6 +2181,8 @@ async def export_download_requests():
         with open(csv_file, 'r', encoding='utf-8') as f:
             csv_content = f.read()
 
+        logger.info("Download requests exported successfully")
+
         # Return as downloadable CSV
         return Response(
             content=csv_content,
@@ -2176,6 +2192,8 @@ async def export_download_requests():
             }
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error exporting download requests: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
