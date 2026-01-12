@@ -67,7 +67,16 @@ const DownloadForm = ({ open, onClose }) => {
 
         try {
             // API base URL
-            const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
+            // In production, use REACT_APP_API_BASE_URL if set, otherwise use relative path
+            // In development, use localhost
+            let apiBaseUrl;
+            if (process.env.NODE_ENV === 'production') {
+                // Production: use env var if available, otherwise relative to current location
+                apiBaseUrl = process.env.REACT_APP_API_BASE_URL || window.location.origin;
+            } else {
+                // Development: use localhost
+                apiBaseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
+            }
 
             // Prepare data, converting empty strings to null for optional fields
             const requestData = {
