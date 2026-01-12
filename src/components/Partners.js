@@ -10,6 +10,12 @@ function Partners({ onTabChange }) {
             institution: "Princeton University, Computer Science, Class of 2027"
         },
         {
+            name: <a href="https://mauzerall.scholar.princeton.edu/" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>Mauzerall Research Group</a>,
+            description: "This project was conducted under the direction of Professor Mauzerall’s research group, which oversaw the research process and supported all stages of project execution. The team provided critical guidance and feedback throughout the development process, including interface design and implementation, and will lead the preparation of the resulting research publication.",
+            role: "Research Mentorship and Supervision",
+            institution: "Princeton University — Civil and Environmental Engineering, and the Center for Policy Research on Energy and the Environment (C-PREE)"
+        },
+        /* {
             name: <a href="https://cpree.princeton.edu/people/yuanyu-xie" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>Yuanyu Xie</a>,
             description: "Main project supervisor and primary researcher for this project. Helped with data collection, developing research methods, and will be the lead author on the resulting research paper. Provided critical guidance throughout the development process.",
             role: "Project Supervisor",
@@ -20,7 +26,7 @@ function Partners({ onTabChange }) {
             description: "Professor and research group leader under whose guidance this project was conducted. Contributed to the research process and provided valuable feedback on interface development throughout the project lifecycle.",
             role: "Project Supervisor",
             institution: "Princeton University, Professor of Civil and Environmental Engineering and Public and International Affairs"
-        },
+        }, */
         {
             name: <a href="https://www.linkedin.com/in/thomas-zhang-2493b5300/" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>Thomas Zhang</a>,
             description: "Contributed to various parts of the interface development, particularly in areas where similar methods and approaches were used across our collaborative projects. Provided technical support and development assistance.",
@@ -31,15 +37,15 @@ function Partners({ onTabChange }) {
 
     const academicPartners = [
         {
-            name: <a href="https://environment.princeton.edu/" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>High Meadows Environmental Institute (HMEI)</a>,
-            description: "Princeton University's interdisciplinary environmental institute that brings together researchers, students, and external partners to address complex environmental challenges. HMEI provided research infrastructure, mentorship, and institutional support for this wildfire impact mapping project.",
-            role: "Research Institution & Project Host",
-            institution: "Princeton University"
-        },
-        {
             name: <a href="https://cpree.princeton.edu/" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>Center for Policy Research on Energy and the Environment (C-PREE)</a>,
             description: "C-PREE is an interdisciplinary research center at the Princeton School for Public and International Affairs dedicated to training the next generation of environmental and energy policy leaders. The center conducts rigorous research that integrates scientific knowledge with social science methodologies and practitioner insights, delivering practical solutions to the world's most pressing environmental and energy challenges.",
             role: "Research Group",
+            institution: "Princeton University"
+        },
+        {
+            name: <a href="https://environment.princeton.edu/" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>High Meadows Environmental Institute (HMEI)</a>,
+            description: "Princeton University's interdisciplinary environmental institute that brings together researchers, students, and external partners to address complex environmental challenges. HMEI provided research infrastructure, mentorship, and institutional support for this wildfire impact mapping project.",
+            role: "Research Institution & Project Host",
             institution: "Princeton University"
         }
     ];

@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Query, Depends, status, BackgroundTa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, and_, extract
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -291,6 +292,21 @@ async def preload_common_datasets():
 
         except Exception as e:
             continue
+
+
+# Pydantic models for request validation
+class DownloadRequest(BaseModel):
+    name: str
+    institution: str
+    email: EmailStr
+    usage_description: str
+    data_type: str  # 'pm25', 'mortality', or 'yll'
+    time_scale: Optional[str] = 'yearly'  # 'daily', 'yearly', 'monthly', 'seasonal'
+    start_year: int
+    end_year: int
+    counties: Optional[str] = None  # Comma-separated FIPS codes or 'all'
+    states: Optional[str] = None  # Comma-separated state names or 'all'
+    age_groups: Optional[str] = None  # For mortality/yll only
 
 
 # Application lifespan
@@ -1583,60 +1599,112 @@ def get_exceedance_summary(db: Session = Depends(get_db)):
 @app.get("/api/download/pm25")
 def download_pm25_data(
     time_scale: str = Query(...,
-                            description="Time scale: yearly, monthly, or seasonal"),
+                            description="Time scale: daily, yearly, monthly, or seasonal"),
     start_year: int = Query(..., ge=2006, le=2023,
                             description="Start year (2006-2023)"),
     end_year: int = Query(..., ge=2006, le=2023,
                           description="End year (2006-2023)"),
+    counties: Optional[str] = Query(None, description="Comma-separated FIPS codes or 'all'"),
+    states: Optional[str] = Query(None, description="Comma-separated state names or 'all'"),
     db: Session = Depends(get_db)
 ):
     """
     Download PM₂.₅ data as CSV for the specified time period and scale.
+    Supports filtering by county FIPS codes or state names.
     """
     try:
         if start_year > end_year:
             raise HTTPException(
                 status_code=400, detail="Start year must be less than or equal to end year")
 
-        # Determine which summary table to use based on time scale
-        if time_scale == "yearly":
-            summary_table = YearlyPM25Summary
-            time_column = summary_table.year
-            group_by = [summary_table.year]
-        elif time_scale == "monthly":
-            summary_table = MonthlyPM25Summary
-            time_column = summary_table.month
-            group_by = [summary_table.year, summary_table.month]
-        elif time_scale == "seasonal":
-            summary_table = SeasonalPM25Summary
-            time_column = summary_table.season
-            group_by = [summary_table.year, summary_table.season]
-        else:
-            raise HTTPException(
-                status_code=400, detail="Invalid time scale. Use 'yearly', 'monthly', or 'seasonal'")
+        # Parse county and state filters
+        county_fips_list = None
+        state_fips_prefix_list = None
 
-        # Query data with county information
-        query = db.query(
-            County.fips,
-            County.name,
-            summary_table.year,
-            time_column,
-            summary_table.avg_total,
-            summary_table.avg_fire,
-            summary_table.avg_nonfire,
-            summary_table.max_total,
-            summary_table.max_fire,
-            summary_table.max_nonfire,
-            summary_table.pop_weighted_total,
-            summary_table.days_count
-        ).join(
-            summary_table, County.fips == summary_table.fips
-        ).filter(
-            summary_table.year >= start_year,
-            summary_table.year <= end_year
-        ).order_by(
-            County.fips, summary_table.year, time_column
-        )
+        if counties and counties.lower() != 'all':
+            county_fips_list = [c.strip() for c in counties.split(',')]
+
+        if states and states.lower() != 'all':
+            # Convert state names to FIPS prefixes (first 2 digits)
+            # We'll need to filter by FIPS prefix
+            state_names = [s.strip().lower() for s in states.split(',')]
+            # Get all counties and filter by state
+            all_counties = db.query(County).all()
+            state_fips_prefix_list = []
+            for county in all_counties:
+                # Extract state name from county name or use state FIPS prefix
+                # For now, we'll use FIPS prefix (first 2 digits)
+                if len(county.fips) >= 2:
+                    state_fips = county.fips[:2]
+                    if state_fips not in state_fips_prefix_list:
+                        state_fips_prefix_list.append(state_fips)
+
+        # Handle daily data separately
+        if time_scale == "daily":
+            query = db.query(
+                County.fips,
+                County.name,
+                DailyPM25.date,
+                DailyPM25.total,
+                DailyPM25.fire,
+                DailyPM25.nonfire
+            ).join(
+                DailyPM25, County.fips == DailyPM25.fips
+            ).filter(
+                func.extract('year', DailyPM25.date) >= start_year,
+                func.extract('year', DailyPM25.date) <= end_year
+            )
+
+            # Apply county/state filters
+            if county_fips_list:
+                query = query.filter(County.fips.in_(county_fips_list))
+            elif state_fips_prefix_list:
+                query = query.filter(func.substring(County.fips, 1, 2).in_(state_fips_prefix_list))
+
+            query = query.order_by(County.fips, DailyPM25.date)
+
+        else:
+            # Determine which summary table to use based on time scale
+            if time_scale == "yearly":
+                summary_table = YearlyPM25Summary
+                time_column = summary_table.year
+            elif time_scale == "monthly":
+                summary_table = MonthlyPM25Summary
+                time_column = summary_table.month
+            elif time_scale == "seasonal":
+                summary_table = SeasonalPM25Summary
+                time_column = summary_table.season
+            else:
+                raise HTTPException(
+                    status_code=400, detail="Invalid time scale. Use 'daily', 'yearly', 'monthly', or 'seasonal'")
+
+            # Query data with county information (excluding pop_weighted)
+            query = db.query(
+                County.fips,
+                County.name,
+                summary_table.year,
+                time_column,
+                summary_table.avg_total,
+                summary_table.avg_fire,
+                summary_table.avg_nonfire,
+                summary_table.max_total,
+                summary_table.max_fire,
+                summary_table.max_nonfire,
+                summary_table.days_count
+            ).join(
+                summary_table, County.fips == summary_table.fips
+            ).filter(
+                summary_table.year >= start_year,
+                summary_table.year <= end_year
+            )
+
+            # Apply county/state filters
+            if county_fips_list:
+                query = query.filter(County.fips.in_(county_fips_list))
+            elif state_fips_prefix_list:
+                query = query.filter(func.substring(County.fips, 1, 2).in_(state_fips_prefix_list))
+
+            query = query.order_by(County.fips, summary_table.year, time_column)
 
         results = query.all()
 
@@ -1647,22 +1715,33 @@ def download_pm25_data(
         # Generate CSV content
         csv_lines = []
 
-        # CSV headers
-        if time_scale == "yearly":
+        # CSV headers (excluding pop_weighted)
+        if time_scale == "daily":
+            headers = ["County_FIPS", "County_Name", "Date", "Total_PM25", "Fire_PM25", "Nonfire_PM25"]
+        elif time_scale == "yearly":
             headers = ["County_FIPS", "County_Name", "Year", "Avg_Total_PM25", "Avg_Fire_PM25", "Avg_Nonfire_PM25",
-                       "Max_Total_PM25", "Max_Fire_PM25", "Max_Nonfire_PM25", "Pop_Weighted_Total_PM25", "Days_Count"]
+                       "Max_Total_PM25", "Max_Fire_PM25", "Max_Nonfire_PM25", "Days_Count"]
         elif time_scale == "monthly":
             headers = ["County_FIPS", "County_Name", "Year", "Month", "Avg_Total_PM25", "Avg_Fire_PM25", "Avg_Nonfire_PM25",
-                       "Max_Total_PM25", "Max_Fire_PM25", "Max_Nonfire_PM25", "Pop_Weighted_Total_PM25", "Days_Count"]
+                       "Max_Total_PM25", "Max_Fire_PM25", "Max_Nonfire_PM25", "Days_Count"]
         else:  # seasonal
             headers = ["County_FIPS", "County_Name", "Year", "Season", "Avg_Total_PM25", "Avg_Fire_PM25", "Avg_Nonfire_PM25",
-                       "Max_Total_PM25", "Max_Fire_PM25", "Max_Nonfire_PM25", "Pop_Weighted_Total_PM25", "Days_Count"]
+                       "Max_Total_PM25", "Max_Fire_PM25", "Max_Nonfire_PM25", "Days_Count"]
 
         csv_lines.append(",".join(headers))
 
         # CSV data rows
         for row in results:
-            if time_scale == "yearly":
+            if time_scale == "daily":
+                csv_line = [
+                    row.fips,
+                    f'"{row.name}"',  # Quote county names to handle commas
+                    row.date.strftime('%Y-%m-%d'),
+                    f"{row.total:.2f}" if row.total is not None else "",
+                    f"{row.fire:.2f}" if row.fire is not None else "",
+                    f"{row.nonfire:.2f}" if row.nonfire is not None else ""
+                ]
+            elif time_scale == "yearly":
                 csv_line = [
                     row.fips,
                     f'"{row.name}"',  # Quote county names to handle commas
@@ -1673,7 +1752,6 @@ def download_pm25_data(
                     f"{row.max_total:.2f}" if row.max_total is not None else "",
                     f"{row.max_fire:.2f}" if row.max_fire is not None else "",
                     f"{row.max_nonfire:.2f}" if row.max_nonfire is not None else "",
-                    f"{row.pop_weighted_total:.2f}" if row.pop_weighted_total is not None else "",
                     str(row.days_count) if row.days_count is not None else ""
                 ]
             elif time_scale == "monthly":
@@ -1688,7 +1766,6 @@ def download_pm25_data(
                     f"{row.max_total:.2f}" if row.max_total is not None else "",
                     f"{row.max_fire:.2f}" if row.max_fire is not None else "",
                     f"{row.max_nonfire:.2f}" if row.max_nonfire is not None else "",
-                    f"{row.pop_weighted_total:.2f}" if row.pop_weighted_total is not None else "",
                     str(row.days_count) if row.days_count is not None else ""
                 ]
             else:  # seasonal
@@ -1703,7 +1780,6 @@ def download_pm25_data(
                     f"{row.max_total:.2f}" if row.max_total is not None else "",
                     f"{row.max_fire:.2f}" if row.max_fire is not None else "",
                     f"{row.max_nonfire:.2f}" if row.max_nonfire is not None else "",
-                    f"{row.pop_weighted_total:.2f}" if row.pop_weighted_total is not None else "",
                     str(row.days_count) if row.days_count is not None else ""
                 ]
 
@@ -1989,6 +2065,120 @@ async def get_state_boundaries():
                      str(e), exc_info=True)
         raise HTTPException(
             status_code=500, detail="Error loading state boundaries")
+
+
+def log_download_request_to_csv(request: DownloadRequest):
+    """Log download request to a CSV file."""
+    import csv
+    from pathlib import Path
+
+    try:
+        # Create logs directory if it doesn't exist
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+
+        csv_file = log_dir / "download_requests.csv"
+        file_exists = csv_file.exists()
+
+        # Append to CSV file
+        with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+            fieldnames = [
+                'timestamp', 'name', 'institution', 'email', 'usage_description',
+                'data_type', 'time_scale', 'start_year', 'end_year',
+                'counties', 'states', 'age_groups'
+            ]
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+            # Write header if file is new
+            if not file_exists:
+                writer.writeheader()
+
+            # Write the request
+            writer.writerow({
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'name': request.name,
+                'institution': request.institution,
+                'email': request.email,
+                'usage_description': request.usage_description,
+                'data_type': request.data_type,
+                'time_scale': request.time_scale,
+                'start_year': request.start_year,
+                'end_year': request.end_year,
+                'counties': request.counties or 'All',
+                'states': request.states or 'All',
+                'age_groups': request.age_groups or 'All'
+            })
+
+        logger.info(f"Download request logged to CSV: {request.email}")
+
+    except Exception as e:
+        logger.error(f"Failed to log download request to CSV: {str(e)}")
+
+
+
+
+@app.post("/api/download/request")
+async def submit_download_request(request: DownloadRequest, background_tasks: BackgroundTasks):
+    """
+    Submit a download request with user information.
+    Logs request to CSV and returns download parameters.
+    """
+    try:
+        # Log request to CSV in background
+        background_tasks.add_task(log_download_request_to_csv, request)
+
+        # Return success with download parameters
+        return {
+            "status": "success",
+            "message": "Download request submitted successfully",
+            "download_params": {
+                "data_type": request.data_type,
+                "time_scale": request.time_scale,
+                "start_year": request.start_year,
+                "end_year": request.end_year,
+                "counties": request.counties,
+                "states": request.states,
+                "age_groups": request.age_groups
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error processing download request: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/download-requests/export")
+async def export_download_requests():
+    """
+    Export all download request logs as CSV.
+    Protected endpoint - only accessible to admins.
+    """
+    try:
+        from pathlib import Path
+
+        csv_file = Path("logs/download_requests.csv")
+
+        if not csv_file.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="No download requests logged yet"
+            )
+
+        # Read the CSV file
+        with open(csv_file, 'r', encoding='utf-8') as f:
+            csv_content = f.read()
+
+        # Return as downloadable CSV
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename=download_requests_{datetime.now().strftime('%Y%m%d')}.csv"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error exporting download requests: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/health")

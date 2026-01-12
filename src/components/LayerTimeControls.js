@@ -90,8 +90,8 @@ const LayerTimeControls = ({
                         </Select>
                     </FormControl>
                 ) : (
-                    <>
-                        <FormControl size="small" sx={{ mb: 0.5 }}>
+                    <Box sx={{ display: 'flex', gap: 1, mb: 0.5 }}>
+                        <FormControl size="small" sx={{ flex: 1, minWidth: 100 }}>
                             <InputLabel id="time-scale-label">Time Scale</InputLabel>
                             <Select
                                 labelId="time-scale-label"
@@ -113,7 +113,7 @@ const LayerTimeControls = ({
                                 <MenuItem value="seasonal">Seasonal</MenuItem>
                             </Select>
                         </FormControl>
-                        <FormControl size="small" sx={{ mb: 0.5 }}>
+                        <FormControl size="small" sx={{ flex: 1, minWidth: 80 }}>
                             <InputLabel id="year-label">Year</InputLabel>
                             <Select
                                 labelId="year-label"
@@ -127,7 +127,7 @@ const LayerTimeControls = ({
                             </Select>
                         </FormControl>
                         {timeControls.timeScale === 'monthly' && (
-                            <FormControl size="small" sx={{ mb: 0.5 }}>
+                            <FormControl size="small" sx={{ flex: 1, minWidth: 100 }}>
                                 <InputLabel id="month-label">Month</InputLabel>
                                 <Select
                                     labelId="month-label"
@@ -142,7 +142,7 @@ const LayerTimeControls = ({
                             </FormControl>
                         )}
                         {timeControls.timeScale === 'seasonal' && (
-                            <FormControl size="small" sx={{ mb: 0.5 }}>
+                            <FormControl size="small" sx={{ flex: 1, minWidth: 100 }}>
                                 <InputLabel id="season-label">Season</InputLabel>
                                 <Select
                                     labelId="season-label"
@@ -156,7 +156,7 @@ const LayerTimeControls = ({
                                 </Select>
                             </FormControl>
                         )}
-                    </>
+                    </Box>
                 )}
             </Box>
         );

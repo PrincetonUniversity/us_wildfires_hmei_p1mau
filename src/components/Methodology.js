@@ -2,105 +2,23 @@ import React, { useState } from 'react';
 import { Box, Typography, Paper, Container, Grid, Card, CardContent, Accordion, AccordionSummary, AccordionDetails, Button, FormControl, InputLabel, Select, MenuItem, TextField } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DownloadIcon from '@mui/icons-material/Download';
+import DownloadForm from './DownloadForm';
 
 function Methodology() {
     const [expanded, setExpanded] = useState(false);
-    // Data download state - UNCOMMENT WHEN READY TO IMPLEMENT
-    // const [downloadType, setDownloadType] = useState('pm25');
-    // const [timeScale, setTimeScale] = useState('yearly');
-    // const [startYear, setStartYear] = useState(2020);
-    // const [endYear, setEndYear] = useState(2023);
-    // const [loading, setLoading] = useState(false);
+    const [downloadFormOpen, setDownloadFormOpen] = useState(false);
 
     const handleExpand = () => {
         setExpanded(!expanded);
     };
 
-    // Data download handler - UNCOMMENT WHEN READY TO IMPLEMENT
-    // const handleDownload = async () => {
-    //     setLoading(true);
-    //     try {
-    //         let endpoint = '';
-    //         let filename = '';
-    //         
-    //         switch (downloadType) {
-    //             case 'pm25':
-    //                 endpoint = `/api/download/pm25?time_scale=${timeScale}&start_year=${startYear}&end_year=${endYear}`;
-    //                 filename = `pm25_data_${time_scale}_${startYear}_${endYear}.csv`;
-    //                 break;
-    //             case 'mortality':
-    //                 endpoint = `/api/download/mortality?start_year=${startYear}&end_year=${endYear}`;
-    //                 filename = `mortality_data_${startYear}_${endYear}.csv`;
-    //                 break;
-    //             case 'yll':
-    //                 endpoint = `/api/download/yll?start_year=${startYear}&end_year=${endYear}`;
-    //                 filename = `yll_data_${startYear}_${endYear}.csv`;
-    //                 break;
-    //             default:
-    //                 return;
-    //         }
-    //         
-    //         const response = await fetch(endpoint);
-    //         if (response.ok) {
-    //             const blob = await response.blob();
-    //             const url = window.URL.createObjectURL(blob);
-    //             const a = document.createElement('a');
-    //             a.href = url;
-    //             a.download = filename;
-    //             document.body.appendChild(a);
-    //             a.click();
-    //             window.URL.revokeObjectURL(url);
-    //             document.body.removeChild(a);
-    //         }
-    //     } catch (error) {
-    //         console.error('Download failed:', error);
-    //     } finally {
-    //         setLoading(false);
-    //     }
-    // };
+    const handleOpenDownloadForm = () => {
+        setDownloadFormOpen(true);
+    };
 
-    // Data download handler - UNCOMMENT WHEN READY TO IMPLEMENT
-    // const handleDownload = async () => {
-    //     setLoading(true);
-    //     try {
-    //         let endpoint = '';
-    //         let filename = '';
-    //         
-    //         switch (downloadType) {
-    //             case 'pm25':
-    //                 endpoint = `/api/download/pm25?time_scale=${timeScale}&start_year=${startYear}&end_year=${endYear}`;
-    //                 filename = `pm25_data_${timeScale}_${startYear}_${endYear}.csv`;
-    //                 break;
-    //             case 'mortality':
-    //                 endpoint = `/api/download/mortality?start_year=${startYear}&end_year=${endYear}`;
-    //                 filename = `mortality_data_${startYear}_${endYear}.csv`;
-    //                 break;
-    //             case 'yll':
-    //                 endpoint = `/api/download/yll?start_year=${startYear}&end_year=${endYear}`;
-    //                 filename = `yll_data_${startYear}_${endYear}.csv`;
-    //                 break;
-    //             default:
-    //                 return;
-    //         }
-    //         
-    //         const response = await fetch(endpoint);
-    //         if (response.ok) {
-    //             const blob = await response.blob();
-    //             const url = window.URL.createObjectURL(blob);
-    //             const a = document.createElement('a');
-    //             a.href = url;
-    //             a.download = filename;
-    //             document.body.appendChild(a);
-    //             a.click();
-    //             window.URL.revokeObjectURL(url);
-    //             document.body.removeChild(a);
-    //         }
-    //     } catch (error) {
-    //         console.error('Download failed:', error);
-    //     } finally {
-    //         setLoading(false);
-    //     }
-    // };
+    const handleCloseDownloadForm = () => {
+        setDownloadFormOpen(false);
+    };
 
     return (
         <Container maxWidth="lg" sx={{ py: 4, px: 4 }}>
@@ -474,100 +392,69 @@ function Methodology() {
                 </Grid>
             </Paper>
 
-            {/* Data Download Section - ADDED NEW SECTION */}
+            {/* Data Download Section */}
             <Paper elevation={2} sx={{ p: 4, mb: 4, ml: 4, mr: 4, mt: 4 }}>
                 <Typography variant="h5" gutterBottom sx={{ fontWeight: 600, color: '#333' }}>
                     Data Downloads
                 </Typography>
                 <Typography variant="body1" paragraph>
-                    Download processed data for research and analysis. All data includes key columns from our summary tables,
-                    filtered by your selected time period and data type.
+                    Download PM2.5 data for research and analysis. Data is available at multiple
+                    temporal frequencies (daily to yearly) and can be filtered by county or state.
                 </Typography>
 
-                {/* Coming Soon Notice - REMOVE WHEN READY TO IMPLEMENT */}
                 <Box sx={{
-                    backgroundColor: '#fff3cd',
-                    border: '1px solid #ffeaa7',
-                    borderRadius: 2,
+                    backgroundColor: '#f5f5f5',
                     p: 3,
+                    borderRadius: 2,
                     mb: 3,
-                    textAlign: 'center'
+                    border: '1px solid #e0e0e0'
                 }}>
-                    <Typography variant="h6" sx={{ color: '#856404', mb: 1 }}>
-                        🚧 Coming Soon
+                    <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, color: '#333' }}>
+                        Available Data:
                     </Typography>
-                    <Typography variant="body2" sx={{ color: '#856404' }}>
-                        Data download functionality is currently under development.
-                    </Typography>
+                    <Grid container spacing={2}>
+                        <Grid item xs={12}>
+                            <Box sx={{ pl: 2 }}>
+                                <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                                    PM2.5 Data (2021-2023)
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                    • Daily, monthly, seasonal, yearly temporal frequencies<br />
+                                    • Total, fire, and non-fire PM2.5 concentrations<br />
+                                    • Average and maximum values<br />
+                                    • Filter by county (FIPS code) or state
+                                </Typography>
+                            </Box>
+                        </Grid>
+                    </Grid>
                 </Box>
 
-                {/* Data Download Interface - UNCOMMENT WHEN READY TO IMPLEMENT */}
-                {/* 
-                <Grid container spacing={3} sx={{ mb: 3 }}>
-                    <Grid item xs={12} md={3}>
-                        <FormControl fullWidth>
-                            <InputLabel>Data Type</InputLabel>
-                            <Select
-                                value={downloadType}
-                                label="Data Type"
-                                onChange={(e) => setDownloadType(e.target.value)}
-                            >
-                                <MenuItem value="pm25">PM₂.₅ Data</MenuItem>
-                                <MenuItem value="mortality">Excess Mortality</MenuItem>
-                                <MenuItem value="yll">Years of Life Lost</MenuItem>
-                            </Select>
-                        </FormControl>
-                    </Grid>
-                    <Grid item xs={12} md={3}>
-                        <FormControl fullWidth>
-                            <InputLabel>Time Scale</InputLabel>
-                            <Select
-                                value={timeScale}
-                                label="Time Scale"
-                                onChange={(e) => setTimeScale(e.target.value)}
-                                disabled={downloadType !== 'pm25'}
-                            >
-                                <MenuItem value="yearly">Yearly</MenuItem>
-                                <MenuItem value="monthly">Monthly</MenuItem>
-                                <MenuItem value="seasonal">Seasonal</MenuItem>
-                            </Select>
-                        </FormControl>
-                    </Grid>
-                    <Grid item xs={12} md={2}>
-                        <TextField
-                            fullWidth
-                            label="Start Year"
-                            type="number"
-                            value={startYear}
-                            onChange={(e) => setStartYear(parseInt(e.target.value))}
-                            inputProps={{ min: 2006, max: 2023 }}
-                        />
-                    </Grid>
-                    <Grid item xs={12} md={2}>
-                        <TextField
-                            fullWidth
-                            label="End Year"
-                            type="number"
-                            value={endYear}
-                            onChange={(e) => setEndYear(parseInt(e.target.value))}
-                            inputProps={{ min: 2006, max: 2023 }}
-                        />
-                    </Grid>
-                    <Grid item xs={12} md={2}>
-                        <Button
-                            fullWidth
-                            variant="contained"
-                            startIcon={<DownloadIcon />}
-                            onClick={handleDownload}
-                            disabled={loading || startYear > endYear}
-                            sx={{ height: '56px' }}
-                        >
-                            {loading ? 'Downloading...' : 'Download'}
-                        </Button>
-                    </Grid>
-                </Grid>
-                */}
+                <Box sx={{ textAlign: 'center' }}>
+                    <Button
+                        variant="contained"
+                        size="large"
+                        startIcon={<DownloadIcon />}
+                        onClick={handleOpenDownloadForm}
+                        sx={{
+                            px: 4,
+                            py: 1.5,
+                            fontSize: '1.1rem',
+                            backgroundColor: '#1976d2',
+                            '&:hover': {
+                                backgroundColor: '#1565c0'
+                            }
+                        }}
+                    >
+                        Request Data Download
+                    </Button>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                        You'll need to provide your name, institution, email, and intended use before downloading.
+                    </Typography>
+                </Box>
             </Paper>
+
+            {/* Download Form Dialog */}
+            <DownloadForm open={downloadFormOpen} onClose={handleCloseDownloadForm} />
 
         </Container>
     );
