@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList } from "recharts";
 
 const COLORS = {
@@ -6,7 +6,7 @@ const COLORS = {
     fire: "#ffb74d",    // orange
 };
 
-export default function CountyMortalityBarChart({ data, timeScale = 'yearly', yllMode = false, containerWidth = 420 }) {
+function CountyMortalityBarChartContent({ data, timeScale = 'yearly', yllMode = false, zoomed, containerWidth = 420 }) {
     // Format data
     const formattedData = data.map(item => {
         // Use Years of Life Lost values if yllMode, otherwise deaths
@@ -29,8 +29,8 @@ export default function CountyMortalityBarChart({ data, timeScale = 'yearly', yl
     for (let t = 0; t <= maxValue; t += tickStep) ticks.push(t);
 
     // Calculate responsive dimensions
-    const chartWidth = Math.min(containerWidth - 20, 350); // Leave 20px padding
-    const chartHeight = 180;
+    const chartWidth = zoomed ? 760 : Math.min(containerWidth - 20, 350); // Leave 20px padding
+    const chartHeight = zoomed ? 350 : 180;
 
     // Tooltip
     const CustomTooltip = ({ active, payload, label }) => {
@@ -61,7 +61,7 @@ export default function CountyMortalityBarChart({ data, timeScale = 'yearly', yl
                 <XAxis
                     dataKey="label"
                     interval={0}
-                    tick={{ fontSize: 9 }}
+                    tick={{ fontSize: zoomed ? 11 : 9 }}
                     height={30}
                     tickFormatter={(label, index) => {
                         // Only show every 2 years (even years)
@@ -72,18 +72,18 @@ export default function CountyMortalityBarChart({ data, timeScale = 'yearly', yl
                 <YAxis
                     domain={[0, maxValue]}
                     ticks={ticks}
-                    tick={{ fontSize: 9 }}
+                    tick={{ fontSize: zoomed ? 11 : 9 }}
                     width={35}
                     label={{
                         value: yllMode ? 'Years of Life Lost' : 'Excess Mortality (deaths/year)',
                         angle: -90,
                         position: 'insideLeft',
-                        style: { textAnchor: 'middle', fontSize: 9 },
+                        style: { textAnchor: 'middle', fontSize: zoomed ? 11 : 9 },
                         offset: 0
                     }}
                 />
                 <Tooltip content={<CustomTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 9 }} />
+                <Legend wrapperStyle={{ fontSize: zoomed ? 11 : 9 }} />
                 <Bar
                     dataKey="nonFire"
                     stackId="a"
@@ -106,7 +106,7 @@ export default function CountyMortalityBarChart({ data, timeScale = 'yearly', yl
                                     y={y - 5}
                                     fill="#666"
                                     textAnchor="middle"
-                                    fontSize={9}
+                                    fontSize={zoomed ? 11 : 9}
                                 >
                                     {total.toFixed(0)}
                                 </text>
@@ -116,6 +116,120 @@ export default function CountyMortalityBarChart({ data, timeScale = 'yearly', yl
                     />
                 </Bar>
             </BarChart>
+        </div>
+    );
+}
+
+export default function CountyMortalityBarChart({ data, timeScale = 'yearly', yllMode = false, containerWidth = 420, onExpand, isExpanded = false }) {
+    const [zoomed, setZoomed] = useState(isExpanded);
+
+    // Update zoomed state when isExpanded prop changes
+    useEffect(() => {
+        setZoomed(isExpanded);
+    }, [isExpanded]);
+
+    // Calculate responsive dimensions based on container width
+    const chartWidth = zoomed ? 760 : Math.min(containerWidth - 10, containerWidth);
+
+    return (
+        <div
+            style={{
+                width: '100%',
+                maxWidth: Math.min(containerWidth - 10, containerWidth),
+                boxSizing: 'border-box',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 0,
+            }}
+        >
+            {/* Chart box with relative positioning */}
+            <div style={{
+                width: 'fit-content',
+                maxWidth: '100%',
+                position: 'relative',
+                background: '#f7f8fa',
+                borderRadius: 8,
+                boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+                padding: 12,
+                marginBottom: 0,
+                minWidth: 0,
+                overflow: 'hidden'
+            }}>
+                {/* Main chart content */}
+                <div style={{ width: '100%', minWidth: 0, overflowX: 'auto' }}>
+                    <CountyMortalityBarChartContent
+                        data={data}
+                        timeScale={timeScale}
+                        yllMode={yllMode}
+                        zoomed={false}
+                        containerWidth={containerWidth}
+                    />
+                </div>
+            </div>
+            {/* Modal overlay for zoomed chart */}
+            {zoomed && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        width: '100vw',
+                        height: '100vh',
+                        background: 'rgba(0,0,0,0.25)',
+                        zIndex: 2000,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                    }}
+                >
+                    <div
+                        style={{
+                            background: '#fff',
+                            borderRadius: 10,
+                            boxShadow: '0 8px 32px 0 rgba(30,34,90,0.18)',
+                            padding: 32,
+                            position: 'relative',
+                            minWidth: 720,
+                            maxWidth: '90vw',
+                            maxHeight: '90vh',
+                            overflow: 'auto',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                        }}
+                    >
+                        <button
+                            onClick={() => {
+                                setZoomed(false);
+                                if (onExpand) onExpand(); // Notify parent that chart is closed
+                            }}
+                            title="Close"
+                            style={{
+                                position: 'absolute',
+                                top: 16,
+                                right: 16,
+                                background: 'transparent',
+                                border: 'none',
+                                fontSize: 28,
+                                color: '#888',
+                                cursor: 'pointer',
+                                zIndex: 2
+                            }}
+                        >
+                            ×
+                        </button>
+                        {/* Render only the chart content */}
+                        <CountyMortalityBarChartContent 
+                            data={data} 
+                            timeScale={timeScale} 
+                            yllMode={yllMode}
+                            zoomed={true} 
+                            containerWidth={chartWidth} 
+                        />
+                    </div>
+                </div>
+            )}
         </div>
     );
 } 

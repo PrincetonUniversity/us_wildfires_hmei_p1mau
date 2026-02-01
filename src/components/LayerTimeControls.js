@@ -225,7 +225,7 @@ const LayerTimeControls = ({
                     </Box>
                 </Box>
                 {/* Health Section */}
-                {false && ( // TODO: Remove this once health metrics are added
+                {true && ( // TODO: Remove this once health metrics are added
                     <Box sx={{ mb: 1.1 }}>
                         <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 0.4, fontSize: '0.98em' }}>
                             Health Metrics

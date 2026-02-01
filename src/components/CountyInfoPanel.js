@@ -213,41 +213,60 @@ const CountyInfoPanel = ({ selectedCounty, onClearSelectedCounty, sidebarWidth =
                              timeScale === 'seasonal' ? 'Daily PM2.5 Concentrations' :
                              'PM2.5 Concentrations'}
                         </Typography>
-                        <button
-                            onClick={() => handleChartExpand('pm25')}
-                            title={expandedChart === 'pm25' ? "Close chart" : "Expand chart"}
-                            style={{
-                                background: expandedChart === 'pm25' ? '#f0f0f0' : 'transparent',
-                                border: '1px solid #bbb',
-                                borderRadius: '50%',
-                                width: 24,
-                                height: 24,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                padding: 0,
-                                fontSize: '12px'
-                            }}
-                        >
-                            {expandedChart === 'pm25' ? (
-                                <svg width="12" height="12" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <line x1="3" y1="3" x2="17" y2="17" stroke="#333" strokeWidth="2" />
-                                    <line x1="17" y1="3" x2="3" y2="17" stroke="#333" strokeWidth="2" />
-                                </svg>
-                            ) : (
-                                <svg width="12" height="12" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <circle cx="9" cy="9" r="7" stroke="#333" strokeWidth="2" />
-                                    <line x1="14.2" y1="14.2" x2="18" y2="18" stroke="#333" strokeWidth="2" strokeLinecap="round" />
-                                </svg>
-                            )}
-                        </button>
+                        {(() => {
+                            const chartType = activeLayer === 'mortality' || activeLayer === 'yll' ? activeLayer : 'pm25';
+                            const isExpanded = expandedChart === chartType;
+                            return (
+                                <button
+                                    onClick={() => handleChartExpand(chartType)}
+                                    title={isExpanded ? "Close chart" : "Expand chart"}
+                                    style={{
+                                        background: isExpanded ? '#f0f0f0' : 'transparent',
+                                        border: '1px solid #bbb',
+                                        borderRadius: '50%',
+                                        width: 24,
+                                        height: 24,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        padding: 0,
+                                        fontSize: '12px'
+                                    }}
+                                >
+                                    {isExpanded ? (
+                                        <svg width="12" height="12" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <line x1="3" y1="3" x2="17" y2="17" stroke="#333" strokeWidth="2" />
+                                            <line x1="17" y1="3" x2="3" y2="17" stroke="#333" strokeWidth="2" />
+                                        </svg>
+                                    ) : (
+                                        <svg width="12" height="12" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <circle cx="9" cy="9" r="7" stroke="#333" strokeWidth="2" />
+                                            <line x1="14.2" y1="14.2" x2="18" y2="18" stroke="#333" strokeWidth="2" strokeLinecap="round" />
+                                        </svg>
+                                    )}
+                                </button>
+                            );
+                        })()}
                     </Box>
                     <div className="chart-overflow-container" data-time-scale={timeScale}>
                         {activeLayer === 'mortality' ? (
-                            <CountyMortalityBarChart data={barChartData} timeScale="yearly" containerWidth={sidebarWidth - 40} />
+                            <CountyMortalityBarChart 
+                                data={barChartData} 
+                                timeScale="yearly" 
+                                containerWidth={sidebarWidth - 40}
+                                isExpanded={expandedChart === 'mortality'}
+                                onExpand={() => setExpandedChart(null)}
+                            />
                         ) : activeLayer === 'yll' ? (
-                            <CountyMortalityBarChart data={barChartData} timeScale="yearly" yllMode containerWidth={sidebarWidth - 40} />
+                            <CountyMortalityBarChart 
+                                data={barChartData} 
+                                timeScale="yearly" 
+                                yllMode 
+                                containerWidth={sidebarWidth - 40}
+                                isExpanded={expandedChart === 'yll'}
+                                onExpand={() => setExpandedChart(null)}
+                            />
                         ) : (
                             <CountyBarChart
                                 key={timeScale}
