@@ -32,7 +32,7 @@ function PageViewLog() {
   const fetchPageviews = (activeKey) => {
     setLoading(true);
     setError('');
-    fetch(`${getApiBaseUrl()}/api/pageviews?limit=500`, {
+    fetch(`${getApiBaseUrl()}/pageviews?limit=500`, {
       headers: { 'X-Admin-Key': activeKey },
     })
       .then((res) => {
