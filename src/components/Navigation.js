@@ -1,6 +1,5 @@
 import React from 'react';
-import { Box, Tabs, Tab, Typography, Link } from '@mui/material';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import { Box, Tabs, Tab, Typography } from '@mui/material';
 
 function Navigation({ activeTab, onTabChange }) {
     const handleChange = (event, newValue) => {
