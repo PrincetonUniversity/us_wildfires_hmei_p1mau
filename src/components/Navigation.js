@@ -51,33 +51,6 @@ function Navigation({ activeTab, onTabChange }) {
                 <Tab label="Partners" value="partners" />
                 <Tab label="Data & Methodology" value="methodology" />
             </Tabs>
-            <Link
-                href="https://williampsun-pm25-exposure-tool.hf.space/"
-                target="_blank"
-                rel="noopener noreferrer"
-                sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0.4,
-                    ml: 2,
-                    flexShrink: 0,
-                    color: 'rgba(0, 0, 0, 0.7)',
-                    fontWeight: 500,
-                    fontSize: '0.85rem',
-                    fontFamily: 'Roboto, sans-serif',
-                    textDecoration: 'none',
-                    whiteSpace: 'nowrap',
-                    padding: '6px 10px',
-                    borderRadius: '4px',
-                    '&:hover': {
-                        color: '#333',
-                        backgroundColor: 'rgba(255, 255, 255, 0.6)',
-                    },
-                }}
-            >
-                Related Tool
-                <OpenInNewIcon sx={{ fontSize: '0.9rem' }} />
-            </Link>
         </Box>
     );
 }
