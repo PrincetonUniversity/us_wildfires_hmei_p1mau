@@ -1,9 +1,22 @@
 // Basic server-side pageview tracking (same-origin, no third-party scripts)
+const ensureApiPath = (baseUrl) => {
+  const normalized = baseUrl.replace(/\/+$/, '');
+  return normalized.endsWith('/api') ? normalized : `${normalized}/api`;
+};
+
 export const getApiBaseUrl = () => {
-  if (process.env.NODE_ENV === 'production') {
-    return process.env.REACT_APP_API_BASE_URL || window.location.origin;
+  const configuredBaseUrl = process.env.REACT_APP_API_BASE_URL;
+  if (configuredBaseUrl) {
+    return ensureApiPath(configuredBaseUrl);
   }
-  return process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api';
+
+  if (process.env.NODE_ENV !== 'production') {
+    return 'http://localhost:8000/api';
+  }
+
+  const isHeatmapPath = window.location.pathname === '/heatmap'
+    || window.location.pathname.startsWith('/heatmap/');
+  return `${window.location.origin}${isHeatmapPath ? '/heatmap/api' : '/api'}`;
 };
 
 export function trackPageview(path) {

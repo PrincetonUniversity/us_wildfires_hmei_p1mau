@@ -2175,30 +2175,33 @@ async def submit_download_request(request: DownloadRequest, background_tasks: Ba
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/download-requests/export")
-async def export_download_requests(api_key: str = Query(..., description="Admin API key")):
+def require_admin_key(request: Request, api_key: Optional[str] = Query(None)):
+    """Gate admin endpoints behind the shared ADMIN_API_KEY.
+
+    The web admin page sends the key in X-Admin-Key so it is not placed in
+    URLs or access logs. The query parameter remains supported for the
+    existing direct CSV-export link.
+    """
+    admin_api_key = os.getenv("ADMIN_API_KEY")
+    if not admin_api_key:
+        raise HTTPException(
+            status_code=500, detail="Admin API key not configured on server")
+
+    supplied = request.headers.get("x-admin-key") or api_key
+    if supplied != admin_api_key:
+        logger.warning("Invalid API key attempt to access admin data")
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+@app.get("/api/download-requests/export", dependencies=[Depends(require_admin_key)])
+async def export_download_requests():
     """
     Export all download request logs as CSV.
-    Protected endpoint - requires admin API key.
+    Protected endpoint - requires the shared admin API key.
 
     Usage: /api/download-requests/export?api_key=YOUR_ADMIN_API_KEY
     """
     try:
-        # Check API key
-        admin_api_key = os.getenv("ADMIN_API_KEY")
-        if not admin_api_key:
-            raise HTTPException(
-                status_code=500,
-                detail="Admin API key not configured on server"
-            )
-
-        if api_key != admin_api_key:
-            logger.warning(f"Invalid API key attempt to access download logs")
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid API key"
-            )
-
         csv_file = Path("logs/download_requests.csv")
 
         if not csv_file.exists():
@@ -2306,22 +2309,6 @@ async def get_view_counts(
     total = db.query(func.count(PageView.id)).scalar()
     by_path = db.query(PageView.path, func.count(PageView.id)).group_by(PageView.path).all()
     return {"total": total, "by_path": {path: count for path, count in by_path}}
-
-
-def require_admin_key(request: Request, api_key: Optional[str] = Query(None)):
-    """Gates admin-only endpoints behind the ADMIN_API_KEY shared secret.
-    Accepts either the X-Admin-Key header (used by the frontend admin page,
-    so the key doesn't end up in server access logs) or the `api_key` query
-    param (matching the convention used by /api/view-counts and
-    /api/download-requests/export, and useful for visiting the endpoint
-    directly by URL). Fails closed if ADMIN_API_KEY itself isn't configured."""
-    admin_api_key = os.getenv("ADMIN_API_KEY")
-    if not admin_api_key:
-        raise HTTPException(status_code=500, detail="Admin API key not configured on server")
-    supplied = request.headers.get("x-admin-key") or api_key
-    if supplied != admin_api_key:
-        logger.warning("Invalid API key attempt to access pageview log")
-        raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 @app.get("/api/pageviews", dependencies=[Depends(require_admin_key)])
