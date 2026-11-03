@@ -1,6 +1,6 @@
 alembic==1.16.1
 annotated-types==0.7.0
-anyio==3.7.1
+anyio==4.14.2
 appnope==0.1.4
 astroid==3.3.11
 asttokens==3.0.0
@@ -11,7 +11,7 @@ blinker==1.9.0
 branca==0.8.1
 cdcwonderpy==0.0.1
 census==0.8.24
-certifi==2025.4.26
+certifi==2026.10.18
 cffi==1.17.1
 charset-normalizer==3.4.2
 click==8.2.1
@@ -60,7 +60,7 @@ pandas==2.2.0
 parso==0.8.4
 passlib==1.7.4
 pexpect==4.9.0
-pillow==11.2.1
+pillow==13.0.0
 platformdirs==4.3.8
 plotly==6.1.2
 prompt_toolkit==3.0.51
@@ -69,7 +69,7 @@ psycopg2-binary==2.9.9
 ptyprocess==0.7.0
 pure_eval==0.2.3
 pyarrow==20.0.0
-pyasn1==0.6.1
+pyasn1==0.4.8
 pycodestyle==2.14.0
 pycparser==2.22
 pydantic==2.11.5
@@ -81,7 +81,7 @@ pyparsing==3.2.3
 pyproj==3.7.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
-python-jose==3.3.0
+python-jose==3.4.0
 python-multipart==0.0.9
 pytz==2025.2
 PyYAML==6.0.2
