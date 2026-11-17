@@ -1,16 +1,12 @@
 FROM python:3.11-slim
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    wget \
+# Install only the runtime tool used by startup.sh. Geospatial Python packages
+# install pre-built wheels, so GDAL/PROJ/GEOS development packages are not needed
+# in the production image. Upgrade the inherited Debian packages first.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
     unzip \
-    libgdal-dev \
-    gdal-bin \
-    libproj-dev \
-    proj-data \
-    proj-bin \
-    libgeos-dev \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
